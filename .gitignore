@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Build & Installer outputs
+out/
+dist/
+release/
+*.tsbuildinfo
+
+# Local databases & user media
+*.sqlite
+*.sqlite-journal
+*.db
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+.env
+.env.local
