@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { LibraryConfig, SongSyncStatus, SongSyncResult } from '../shared/songSync'
+import { ShortcutBindings } from '../shared/keyboardShortcuts'
 import {
   AudioCategory,
   AudioTrack,
@@ -18,6 +19,8 @@ import {
 interface LibraryPayload { songs: Song[]; serviceItems: ServiceItem[]; status: SongSyncStatus }
 
 const nscApi = {
+  getShortcuts: (): Promise<ShortcutBindings> => ipcRenderer.invoke('nsc:get-shortcuts'),
+  saveShortcuts: (bindings: ShortcutBindings): Promise<ShortcutBindings> => ipcRenderer.invoke('nsc:save-shortcuts', bindings),
   mediaStorageStatus: (): Promise<MediaStorageStatus> => ipcRenderer.invoke('nsc:media-storage-status'),
   chooseMediaFolder: (): Promise<(MediaStorageStatus & { copied: number }) | null> => ipcRenderer.invoke('nsc:choose-media-folder'),
   libraryStatus: (): Promise<SongSyncStatus> => ipcRenderer.invoke('nsc:library-status'),

@@ -88,6 +88,14 @@ export interface DisplayInfo {
 export type ScreenType = 'audience' | 'stage'
 export type LanguageMode = 'both' | 'primary' | 'secondary'
 
+export interface CustomTextLayout {
+  x: number
+  y: number
+  width: number
+  align: 'left' | 'center' | 'right'
+  languageGap: number
+}
+
 /**
  * Dynamic Output Screen Profile (ProPresenter "Configure Screens" model):
  * Users can create 1, 2, 3, 4, or more Audience or Stage screens dynamically
@@ -106,7 +114,8 @@ export interface OutputProfile {
   primaryColor: string
   secondaryColor: string
   dimOpacity: number
-  verticalAlign: 'top' | 'center' | 'bottom'
+  verticalAlign: 'top' | 'center' | 'bottom' | 'custom'
+  customTextLayout?: CustomTextLayout
 }
 
 export interface SlideCue extends BilingualSlide {

@@ -18,6 +18,7 @@ import { SongLibrarySync } from './songSync'
 import { LibraryConfig } from '../shared/songSync'
 import { MediaStorage, mediaFileName } from './mediaStorage'
 import { getAppIconPath } from './appIcon'
+import { KeyboardSettings } from './keyboardSettings'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -73,7 +74,7 @@ function createOperatorWindow(): void {
   operatorWindow = new BrowserWindow({
     title: 'NSC Presenter',
     icon: getAppIconPath(),
-    width: 1600,
+    width: 1700,
     height: 1000,
     minWidth: 1120,
     minHeight: 700,
@@ -132,6 +133,9 @@ function registerIpcHandlers(): void {
     }
   }
   const libraryPayload = () => ({ songs: db.getAllSongs(), serviceItems: db.getServiceItems(), status: songLibrary.status() })
+  const keyboardSettings = new KeyboardSettings(db.getStorageDirectory())
+  ipcMain.handle('nsc:get-shortcuts', (event) => { requireOperator(event); return keyboardSettings.read() })
+  ipcMain.handle('nsc:save-shortcuts', (event, value: unknown) => { requireOperator(event); return keyboardSettings.save(value) })
   ipcMain.handle('nsc:media-storage-status', (event) => {
     requireOperator(event)
     return mediaStorage.getStatus()

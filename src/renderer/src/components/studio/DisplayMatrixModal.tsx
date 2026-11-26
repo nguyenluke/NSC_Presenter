@@ -472,6 +472,7 @@ export const DisplayMatrixModal: React.FC<DisplayMatrixModalProps> = ({
                           <option value="top">Top (Upper Screen)</option>
                           <option value="center">Centered (Standard LED / Projector)</option>
                           <option value="bottom">Lower-Third Bottom (Livestream / Side TV)</option>
+                          <option value="custom">Custom (adjust using Text → Customize text position)</option>
                         </select>
                       </div>
 

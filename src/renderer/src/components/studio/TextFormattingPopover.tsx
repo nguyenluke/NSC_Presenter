@@ -1,16 +1,19 @@
 import React, { useState } from 'react'
 import { AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, Type, X } from 'lucide-react'
-import { OutputProfile } from '@shared/types'
+import { LivePresentationState, OutputProfile } from '@shared/types'
+import { CustomTextPositionEditor } from './CustomTextPositionEditor'
 
 interface Props {
   profiles: OutputProfile[]
+  liveState: LivePresentationState
   onChange: (target: string, patch: Partial<OutputProfile>) => Promise<void>
   onClose: () => void
 }
 
-export const TextFormattingPopover: React.FC<Props> = ({ profiles, onChange, onClose }) => {
+export const TextFormattingPopover: React.FC<Props> = ({ profiles, liveState, onChange, onClose }) => {
   const [target, setTarget] = useState('all')
   const [error, setError] = useState('')
+  const [showCustom, setShowCustom] = useState(false)
   const profile = profiles.find((item) => item.id === target) ?? profiles[0]
   const activeTarget = target === 'all' || profiles.some((item) => item.id === target) ? target : 'all'
   const targets = activeTarget === 'all' ? profiles : profiles.filter((item) => item.id === activeTarget)
@@ -30,6 +33,11 @@ export const TextFormattingPopover: React.FC<Props> = ({ profiles, onChange, onC
         <div><div className="studio-field-label">Text position {mixed('verticalAlign') && <span className="text-amber-300">· Mixed</span>}</div><div className="studio-segmented grid grid-cols-3">{([
           ['top', 'Top', AlignVerticalJustifyStart], ['center', 'Center', AlignVerticalJustifyCenter], ['bottom', 'Bottom', AlignVerticalJustifyEnd]
         ] as const).map(([position, label, Icon]) => <button key={position} aria-label={`Align text ${position}`} aria-pressed={!mixed('verticalAlign') && profile.verticalAlign === position} onClick={() => void update({ verticalAlign: position })}><Icon size={15} /><span>{label}</span></button>)}</div></div>
+        <button aria-expanded={showCustom} onClick={() => setShowCustom(!showCustom)}
+          className="studio-field w-full text-left">{profile.verticalAlign === 'custom' ? 'Custom position active' : 'Customize text position'} · {showCustom ? 'Hide editor' : 'Open editor'}</button>
+        {showCustom && activeTarget === 'all' && <p className="text-[10px] text-zinc-400">Preview uses {profile.name}. Apply layout updates all audience screens. Choose one screen above for an independent layout.</p>}
+        {showCustom && <CustomTextPositionEditor key={activeTarget} profile={profile} liveState={liveState}
+          onApply={(layout) => onChange(activeTarget, { verticalAlign: 'custom', customTextLayout: layout })} />}
         {(['primary', 'secondary'] as const).map((language) => {
           const sizeKey = language === 'primary' ? 'primaryFontSize' : 'secondaryFontSize'
           const colorKey = language === 'primary' ? 'primaryColor' : 'secondaryColor'
