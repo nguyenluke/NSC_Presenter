@@ -1,6 +1,6 @@
 {
   "name": "nsc-presenter",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "NSC Presenter — Bilingual Multi-Screen Worship & Live Visual Studio",
   "main": "./out/main/index.js",
   "author": "NSC Worship Team",
@@ -50,8 +50,14 @@
       "node_modules/sql.js/dist/sql-wasm.wasm"
     ],
     "extraResources": [
-      { "from": "build/icon.ico", "to": "icon.ico" },
-      { "from": "build/icon.png", "to": "icon.png" }
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
     ],
     "win": {
       "target": "nsis",
