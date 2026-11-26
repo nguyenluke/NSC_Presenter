@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Check, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { SongSlidePreview } from './SongSlidePreview'
+import { SongKeySelect } from './SongKeySelect'
 import { BilingualSlide, LivePresentationState, OutputProfile, SectionType, Song, SongInput, SongSection } from '@shared/types'
 
 interface SongEditorViewProps {
@@ -9,6 +10,7 @@ interface SongEditorViewProps {
   liveState: LivePresentationState
   onCancel: () => void
   onSave: (input: SongInput) => Promise<void>
+  onUseTemporarily: (input: SongInput) => Promise<void>
 }
 
 const SECTION_TYPES: SectionType[] = [
@@ -50,7 +52,8 @@ export const SongEditorView: React.FC<SongEditorViewProps> = ({
   previewProfile,
   liveState,
   onCancel,
-  onSave
+  onSave,
+  onUseTemporarily
 }) => {
   const [titlePrimary, setTitlePrimary] = useState(initialSong?.titlePrimary ?? '')
   const [titleSecondary, setTitleSecondary] = useState(initialSong?.titleSecondary ?? '')
@@ -85,6 +88,7 @@ export const SongEditorView: React.FC<SongEditorViewProps> = ({
   const [showQuickPaste, setShowQuickPaste] = useState(false)
   const [quickPasteText, setQuickPasteText] = useState('')
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   const activeSection = sections.find((s) => s.id === activeSecId) ?? sections[0]
   const activeSlide =
@@ -203,10 +207,12 @@ export const SongEditorView: React.FC<SongEditorViewProps> = ({
     setShowQuickPaste(false)
   }
 
-  const handleSave = async (): Promise<void> => {
+  const handleSave = async (temporary = false): Promise<void> => {
     if (!titlePrimary.trim()) return
     setSaving(true)
-    await onSave({
+    setError('')
+    try {
+    await (temporary ? onUseTemporarily : onSave)({
       id: initialSong?.id,
       titlePrimary: titlePrimary.trim(),
       titleSecondary: titleSecondary.trim(),
@@ -216,14 +222,16 @@ export const SongEditorView: React.FC<SongEditorViewProps> = ({
       sections,
       arrangement: arrangement.length > 0 ? arrangement : sections.map((s) => s.id)
     })
-    setSaving(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not apply song edits.')
+    } finally { setSaving(false) }
   }
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-[#18191c]">
       {/* Top Song Info Bar */}
-      <div className="px-5 py-3 bg-[#22242a] border-b border-[#32353e] flex items-center justify-between gap-4 shrink-0">
-        <div className="flex items-center gap-3 flex-1">
+      <div className="px-5 py-3 bg-[#22242a] border-b border-[#32353e] flex flex-wrap items-center justify-between gap-4 shrink-0">
+        <div className="flex flex-wrap items-center gap-3 flex-1">
           <div className="w-64">
             <label className="block text-[10px] font-semibold uppercase text-zinc-400 mb-0.5">
               Song Title (Language 1) *
@@ -246,13 +254,14 @@ export const SongEditorView: React.FC<SongEditorViewProps> = ({
               className="w-full px-3 py-1.5 rounded-md bg-[#141518] border border-[#383b46] text-sm text-amber-200 focus:outline-none focus:border-orange-500"
             />
           </div>
-          <div className="w-20">
-            <label className="block text-[10px] font-semibold uppercase text-zinc-400 mb-0.5">
+          <div className="w-28">
+            <label htmlFor="edit-song-key" className="block text-[10px] font-semibold uppercase text-zinc-400 mb-0.5">
               Key
             </label>
-            <input
+            <SongKeySelect
+              id="edit-song-key"
               value={musicalKey}
-              onChange={(e) => setMusicalKey(e.target.value)}
+              onChange={setMusicalKey}
               className="w-full px-2.5 py-1.5 rounded-md bg-[#141518] border border-[#383b46] text-sm font-mono text-white text-center"
             />
           </div>
@@ -281,20 +290,30 @@ export const SongEditorView: React.FC<SongEditorViewProps> = ({
           <button
             type="button"
             onClick={onCancel}
+            disabled={saving}
             className="px-4 py-2 rounded-md bg-[#2c2f38] hover:bg-[#363a45] text-xs font-semibold text-zinc-200"
           >
-            Back to Show
+            Don’t Save
           </button>
+          {initialSong && <button type="button" disabled={saving || !titlePrimary.trim()}
+            onClick={() => void handleSave(true)}
+            className="px-3 py-2 rounded-md bg-[#2c2f38] hover:bg-[#363a45] text-xs font-semibold text-cyan-300 disabled:opacity-40">
+            Use Temporarily
+          </button>}
           <button
             type="button"
             disabled={saving || !titlePrimary.trim()}
-            onClick={handleSave}
+            onClick={() => void handleSave()}
             className="px-5 py-2 rounded-md bg-orange-500 hover:bg-orange-400 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-1.5 shadow"
           >
             <Check className="w-4 h-4" />
             {saving ? 'Saving...' : 'Save Song'}
           </button>
         </div>
+      </div>
+      <div className="px-5 py-2 text-xs text-zinc-400 border-b border-[#32353e]">
+        Use Temporarily applies edits for this session only. Save Song keeps them and queues them for sync.
+        {error && <p role="alert" className="text-red-300 mt-1">{error}</p>}
       </div>
 
       {/* Main ProPresenter Slide Reflow / Visual Editor Split */}

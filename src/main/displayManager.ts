@@ -1,6 +1,7 @@
 import path from 'path'
 import { BrowserWindow, screen } from 'electron'
 import { DisplayInfo, LivePresentationState, OutputProfile } from '@shared/types'
+import { getAppIconPath } from './appIcon'
 
 /**
  * Dynamic Real-Life Multi-Screen Router (ProPresenter "Configure Screens" Engine):
@@ -102,6 +103,7 @@ export class DisplayRouter {
       if (!existing || existing.isDestroyed()) {
         const offset = 45 + index * 40
         const win = new BrowserWindow({
+          icon: getAppIconPath(),
           title: `NSC Output — ${profile.name} (Press ESC to exit fullscreen)`,
           x: shouldGoFullscreen ? targetDisplay.bounds.x : targetDisplay.bounds.x + offset,
           y: shouldGoFullscreen ? targetDisplay.bounds.y : targetDisplay.bounds.y + offset,

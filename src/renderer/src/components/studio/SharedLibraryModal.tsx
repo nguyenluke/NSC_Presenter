@@ -14,6 +14,7 @@ export const SharedLibraryModal: React.FC<{ onClose: () => void }> = ({ onClose 
   const [result, setResult] = useState<SongSyncResult | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const refreshSongs = useStudioStore((state) => state.refreshLibrarySongs)
+  const temporarySongCount = useStudioStore((state) => Object.keys(state.temporarySongs).length)
 
   useEffect(() => {
     window.nscApi.libraryStatus().then((data) => {
@@ -46,6 +47,9 @@ export const SharedLibraryModal: React.FC<{ onClose: () => void }> = ({ onClose 
         </header>
         <div className="p-5 space-y-4">
           <p className="text-xs text-zinc-400">Share bilingual songs between home and church. Songs remain saved on this PC for offline services. Playlists, media files, and screen settings stay on this PC.</p>
+          {temporarySongCount > 0 && <p className="text-xs text-cyan-200">
+            {temporarySongCount} song{temporarySongCount === 1 ? ' has' : 's have'} temporary edits. These edits are excluded from sync. Save Song first if you want to keep and sync them.
+          </p>}
           <div className="rounded border border-[#3a3d46] p-3 text-xs flex items-center justify-between gap-3">
             <span>{status ? `${status.pending} local change${status.pending === 1 ? '' : 's'} waiting to sync` : 'Loading library status…'}</span>
             <button disabled={busy || !status} className="text-blue-300 hover:underline disabled:opacity-40" onClick={() => setShowSettings(!showSettings)}>{showSettings ? 'Hide connection' : 'Connection settings'}</button>

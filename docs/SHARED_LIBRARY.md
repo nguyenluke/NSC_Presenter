@@ -77,6 +77,14 @@ After its first authorized sync, a local library stays bound to that project/lib
 4. Run the service from local data. Slide changes never wait for a cloud request.
 5. After any church edits, sync again to share them with home.
 
+### Temporary service changes
+
+- In Edit or Reflow, choose **Use Temporarily** to use a different key, lyrics, chords, or arrangement for this session. These edits stay in memory and are excluded from the local database, backups, and cloud uploads.
+- Show mode displays a temporary-edits banner for that song. **Don't Save** restores its saved version, including the Stage key. Closing or reloading the app also discards temporary edits.
+- **Save Song** keeps the current version in the local database and queues it for the next manual sync. New songs must be saved before they can use temporary edits.
+- Discarding temporary edits leaves any previously saved pending changes intact. If there were no pending changes before editing, temporary edits and discarding them keep the pending count at zero. Saving an unchanged song does not create a new pending change.
+- Sync continues to exchange saved versions while temporary edits are active. Discard restores the latest saved version if a sync downloaded an update during the session.
+
 For a conflict, review both song payloads. **Keep this PC's version** stages it for the next upload. **Use shared version** replaces the pending local edit. Deletions are explicitly labeled. If the shared song changed again while you reviewed it, sync again before choosing. The currently projected slide stays as its live snapshot during song downloads; cue a slide to project updated content.
 
 ## Backups and recovery
@@ -95,6 +103,7 @@ For a conflict, review both song payloads. **Keep this PC's version** stages it 
 ```bash
 npm install
 npm run test:sync
+node --test tests/temporary-song-edits.test.cjs
 npm run typecheck
 npm run build
 ```

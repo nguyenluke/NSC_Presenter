@@ -16,6 +16,8 @@ import { PresenterDatabase } from './database'
 import { DisplayRouter } from './displayManager'
 import { SongLibrarySync } from './songSync'
 import { LibraryConfig } from '../shared/songSync'
+import { MediaStorage, mediaFileName } from './mediaStorage'
+import { getAppIconPath } from './appIcon'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -35,6 +37,8 @@ let db: PresenterDatabase
 let songLibrary: SongLibrarySync
 let displayRouter: DisplayRouter
 let timerInterval: NodeJS.Timeout | null = null
+let mediaStorage: MediaStorage
+let choosingMediaFolder = false
 
 let liveState: LivePresentationState = {
   activeSongId: null,
@@ -59,11 +63,7 @@ let liveState: LivePresentationState = {
 }
 
 function getMediaDirectory(): string {
-  const dir = path.join(app.getPath('userData'), 'NSC_Data', 'media')
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true })
-  }
-  return dir
+  return mediaStorage.getDirectory()
 }
 
 function createOperatorWindow(): void {
@@ -72,6 +72,7 @@ function createOperatorWindow(): void {
 
   operatorWindow = new BrowserWindow({
     title: 'NSC Presenter',
+    icon: getAppIconPath(),
     width: 1600,
     height: 1000,
     minWidth: 1120,
@@ -131,6 +132,26 @@ function registerIpcHandlers(): void {
     }
   }
   const libraryPayload = () => ({ songs: db.getAllSongs(), serviceItems: db.getServiceItems(), status: songLibrary.status() })
+  ipcMain.handle('nsc:media-storage-status', (event) => {
+    requireOperator(event)
+    return mediaStorage.getStatus()
+  })
+  ipcMain.handle('nsc:choose-media-folder', async (event) => {
+    requireOperator(event)
+    if (choosingMediaFolder || mediaStorage.busy) throw new Error('A media folder change is already in progress.')
+    choosingMediaFolder = true
+    try {
+      const result = await dialog.showOpenDialog(operatorWindow!, {
+        title: 'Choose a Folder for NSC Images, Videos and Audio',
+        defaultPath: getMediaDirectory(),
+        properties: ['openDirectory', 'createDirectory']
+      })
+      if (result.canceled || !result.filePaths[0]) return null
+      const names = [...db.getMediaAssets(), ...db.getAudioTracks()]
+        .map((asset) => mediaFileName(asset.url)).filter((name): name is string => name !== null)
+      return await mediaStorage.changeDirectory(result.filePaths[0], names)
+    } finally { choosingMediaFolder = false }
+  })
   ipcMain.handle('nsc:library-status', (event) => { requireOperator(event); return songLibrary.status() })
   ipcMain.handle('nsc:library-configure', async (event, config: LibraryConfig) => {
     requireOperator(event)
@@ -229,7 +250,7 @@ function registerIpcHandlers(): void {
       return db.getMediaAssets()
     }
 
-    const mediaDir = getMediaDirectory()
+    const mediaDir = mediaStorage.getImportDirectory()
     const videoExts = new Set(['.mp4', '.webm', '.mov'])
 
     for (const srcPath of result.filePaths) {
@@ -272,7 +293,7 @@ function registerIpcHandlers(): void {
       return db.getAudioTracks()
     }
 
-    const mediaDir = getMediaDirectory()
+    const mediaDir = mediaStorage.getImportDirectory()
     for (const srcPath of result.filePaths) {
       const ext = path.extname(srcPath).toLowerCase()
       const baseName = path.basename(srcPath, ext)
@@ -366,6 +387,8 @@ function registerIpcHandlers(): void {
 }
 
 app.whenReady().then(async () => {
+  if (process.platform === 'win32') app.setAppUserModelId('org.nscchurch.presenter')
+  mediaStorage = new MediaStorage(path.join(app.getPath('userData'), 'NSC_Data'))
   protocol.handle('nsc-media', (request) => {
     const parsed = new URL(request.url)
     const fileName = decodeURIComponent(parsed.pathname.replace(/^\//, ''))

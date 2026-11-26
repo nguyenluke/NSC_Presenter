@@ -44,6 +44,11 @@ export interface SongInput {
 
 export type MediaBin = 'Worship Designs' | 'Motion Loops' | 'Sermon & Events' | 'Logos'
 
+export interface MediaStorageStatus {
+  directory: string
+  available: boolean
+}
+
 export interface MediaAsset {
   id: number
   title: string

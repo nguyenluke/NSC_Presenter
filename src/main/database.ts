@@ -394,6 +394,14 @@ export class PresenterDatabase {
       input.arrangement.length > 0 ? input.arrangement : input.sections.map((s) => s.id)
     )
 
+    // Saving an unchanged song must not create another pending cloud change.
+    const existing = input.id ? this.getAllSongs().find((song) => song.id === input.id) : undefined
+    if (existing && existing.titlePrimary === input.titlePrimary &&
+        existing.titleSecondary === input.titleSecondary && existing.author === input.author &&
+        existing.musicalKey === input.musicalKey && existing.bpm === input.bpm &&
+        JSON.stringify(existing.sections) === sectionsJson &&
+        JSON.stringify(existing.arrangement) === arrangementJson) return existing
+
     if (input.id) {
       this.db.run(
         `UPDATE songs

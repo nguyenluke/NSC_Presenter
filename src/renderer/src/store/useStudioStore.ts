@@ -43,6 +43,7 @@ export function flattenSongSlides(song: Song | undefined | null): SlideCue[] {
 interface StudioStore {
   initialized: boolean
   songs: Song[]
+  temporarySongs: Record<number, Song>
   mediaAssets: MediaAsset[]
   audioTracks: AudioTrack[]
   serviceItems: ServiceItem[]
@@ -75,6 +76,8 @@ interface StudioStore {
   updateLiveFlags: (partial: Partial<LivePresentationState>) => Promise<void>
 
   saveSong: (input: SongInput) => Promise<Song | undefined>
+  useSongTemporarily: (input: SongInput) => Promise<void>
+  discardTemporarySong: (id: number) => Promise<void>
   deleteSong: (id: number) => Promise<void>
 
   addToService: (itemType: 'song' | 'media', targetId: number) => Promise<void>
@@ -122,6 +125,7 @@ const defaultLiveState: LivePresentationState = {
 export const useStudioStore = create<StudioStore>((set, get) => ({
   initialized: false,
   songs: [],
+  temporarySongs: {},
   mediaAssets: [],
   audioTracks: [],
   serviceItems: [],
@@ -165,6 +169,8 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
   refreshLibrarySongs: async () => {
     const data = await window.nscApi.bootstrap()
     set((state) => ({ songs: data.songs, serviceItems: data.serviceItems,
+      temporarySongs: Object.fromEntries(Object.entries(state.temporarySongs)
+        .filter(([id]) => data.songs.some((song) => song.id === Number(id)))),
       selectedSongId: data.songs.some((song) => song.id === state.selectedSongId)
         ? state.selectedSongId : data.songs[0]?.id ?? null }))
   },
@@ -180,6 +186,7 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
   },
 
   triggerSlide: async (song, globalIndex) => {
+    song = get().temporarySongs[song.id] ?? song
     const cues = flattenSongSlides(song)
     const current = cues[globalIndex] || null
     const next = cues[globalIndex + 1] || null
@@ -220,7 +227,7 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
   stepSlide: async (delta) => {
     const { songs, selectedSongId, liveState, triggerSlide } = get()
     const targetSongId = liveState.activeSongId ?? selectedSongId
-    const song = songs.find((s) => s.id === targetSongId)
+    const song = get().temporarySongs[targetSongId ?? -1] ?? songs.find((s) => s.id === targetSongId)
     if (!song) return
 
     const cues = flattenSongSlides(song)
@@ -237,7 +244,7 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
   jumpToSectionNumber: async (oneBasedSectionNum) => {
     const { songs, selectedSongId, liveState, triggerSlide } = get()
     const targetSongId = liveState.activeSongId ?? selectedSongId
-    const song = songs.find((s) => s.id === targetSongId)
+    const song = get().temporarySongs[targetSongId ?? -1] ?? songs.find((s) => s.id === targetSongId)
     if (!song) return
 
     const cues = flattenSongSlides(song)
@@ -286,11 +293,46 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
     set({ liveState: updated })
   },
 
+  useSongTemporarily: async (input) => {
+    const original = get().songs.find((song) => song.id === input.id)
+    if (!original) throw new Error('Save a new song before using temporary edits.')
+    const draft: Song = { ...structuredClone(input), id: original.id, updatedAt: original.updatedAt }
+    set((state) => ({ temporarySongs: { ...state.temporarySongs, [draft.id]: draft } }))
+    const { liveState } = get()
+    if (liveState.activeSongId === draft.id) {
+      const cues = flattenSongSlides(draft)
+      const index = Math.max(0, Math.min(liveState.activeSlideGlobalIndex, cues.length - 1))
+      await get().updateLiveFlags({ activeSongKey: draft.musicalKey,
+        activeSongTitle: draft.titleSecondary ? `${draft.titlePrimary} / ${draft.titleSecondary}` : draft.titlePrimary,
+        activeSlideGlobalIndex: index, currentSlide: cues[index] ?? null, nextSlide: cues[index + 1] ?? null })
+    }
+  },
+
+  discardTemporarySong: async (id) => {
+    const original = get().songs.find((song) => song.id === id)
+    set((state) => {
+      const temporarySongs = { ...state.temporarySongs }
+      delete temporarySongs[id]
+      return { temporarySongs }
+    })
+    const { liveState } = get()
+    if (original && liveState.activeSongId === id) {
+      const cues = flattenSongSlides(original)
+      const index = Math.max(0, Math.min(liveState.activeSlideGlobalIndex, cues.length - 1))
+      await get().updateLiveFlags({ activeSongKey: original.musicalKey,
+        activeSongTitle: original.titleSecondary ? `${original.titlePrimary} / ${original.titleSecondary}` : original.titlePrimary,
+        activeSlideGlobalIndex: index, currentSlide: cues[index] ?? null, nextSlide: cues[index + 1] ?? null })
+    }
+  },
+
   saveSong: async (input) => {
     const songs = await window.nscApi.saveSong(input)
     const saved = input.id ? songs.find((s) => s.id === input.id) : songs[0]
+    const temporarySongs = { ...get().temporarySongs }
+    if (saved) delete temporarySongs[saved.id]
     set({
       songs,
+      temporarySongs,
       selectedSongId: saved?.id ?? get().selectedSongId
     })
     const { liveState, triggerSlide } = get()
@@ -302,8 +344,11 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
 
   deleteSong: async (id) => {
     const res = await window.nscApi.deleteSong(id)
+    const temporarySongs = { ...get().temporarySongs }
+    delete temporarySongs[id]
     set((state) => ({
       songs: res.songs,
+      temporarySongs,
       serviceItems: res.serviceItems,
       selectedSongId:
         state.selectedSongId === id ? (res.songs[0]?.id ?? null) : state.selectedSongId
@@ -414,6 +459,7 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
     if (!data) return false
     set({
       songs: data.songs,
+      temporarySongs: {},
       mediaAssets: data.mediaAssets,
       audioTracks: data.audioTracks,
       serviceItems: data.serviceItems,

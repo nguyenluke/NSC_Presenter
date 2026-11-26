@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { FolderPlus, Music, Square, Trash2, Volume2 } from 'lucide-react'
 import { PAD_KEYS } from './padKeys'
+import { PAD_SOUNDS, WorshipPadEngine } from './worshipPads'
 import { AudioCategory, AudioTrack } from '@shared/types'
 
 interface AudioBinDrawerProps {
@@ -11,7 +12,7 @@ interface AudioBinDrawerProps {
 
 /**
  * ProPresenter 7 "Audio Bin" + Built-In Worship Leader Ambient Prayer Pads!
- * 1. Built-in warm worship synth pad in all 12 chromatic keys with smooth 2.2s worship fade-in / fade-out!
+ * 1. Five original stereo pad sounds in all 12 keys, with smooth 2.8s crossfades.
  * 2. Import `.mp3` / `.wav` / `.m4a` walk-in music or backing pads with smooth fade-out!
  */
 export const AudioBinDrawer: React.FC<AudioBinDrawerProps> = ({
@@ -21,89 +22,58 @@ export const AudioBinDrawer: React.FC<AudioBinDrawerProps> = ({
 }) => {
   const [audioError, setAudioError] = useState('')
   const [activePadKey, setActivePadKey] = useState<string | null>(null)
+  const [padSoundId, setPadSoundId] = useState(PAD_SOUNDS[0].id)
   const [playingTrackId, setPlayingTrackId] = useState<number | null>(null)
   const [volume, setVolume] = useState(0.55)
 
   const audioCtxRef = useRef<AudioContext | null>(null)
-  const padGainRef = useRef<GainNode | null>(null)
-  const padOscsRef = useRef<OscillatorNode[]>([])
+  const padEngineRef = useRef<WorshipPadEngine | null>(null)
+  const activePadRef = useRef<string | null>(null)
+  const padRequestRef = useRef(0)
   const htmlAudioRef = useRef<HTMLAudioElement | null>(null)
 
   const stopAmbientPadSmoothly = (): void => {
-    const ctx = audioCtxRef.current
-    const gain = padGainRef.current
-    const oscs = padOscsRef.current
-    if (ctx && gain) {
-      const now = ctx.currentTime
-      gain.gain.cancelScheduledValues(now)
-      gain.gain.setValueAtTime(gain.gain.value, now)
-      gain.gain.linearRampToValueAtTime(0.0001, now + 2.0)
-      setTimeout(() => {
-        oscs.forEach((o) => {
-          try {
-            o.stop()
-          } catch {
-            // already stopped
-          }
-        })
-      }, 2100)
-    }
-    padGainRef.current = null
-    padOscsRef.current = []
+    padRequestRef.current++
+    padEngineRef.current?.stop()
+    activePadRef.current = null
     setActivePadKey(null)
   }
 
-  const togglePadKey = (keyName: string, rootFreq: number): void => {
-    if (activePadKey === keyName) {
-      stopAmbientPadSmoothly()
-      return
-    }
-
-    stopAmbientPadSmoothly()
-
-    const ctx = audioCtxRef.current || new AudioContext()
-    audioCtxRef.current = ctx
+  const startPad = async (keyName: string, rootFreq: number, soundId: string): Promise<void> => {
+    const request = ++padRequestRef.current
     setAudioError('')
-    if (ctx.state === 'suspended') {
-      void ctx.resume().catch(() => setAudioError('Audio could not start. Check your audio output and try again.'))
+    try {
+      const ctx = audioCtxRef.current || new AudioContext()
+      audioCtxRef.current = ctx
+      if (!padEngineRef.current) padEngineRef.current = new WorshipPadEngine(ctx, volume)
+      if (ctx.state === 'suspended') await ctx.resume()
+      if (request !== padRequestRef.current) return
+      padEngineRef.current.play(rootFreq, PAD_SOUNDS.find((sound) => sound.id === soundId) ?? PAD_SOUNDS[0])
+      activePadRef.current = keyName
+      setActivePadKey(keyName)
+    } catch {
+      if (request !== padRequestRef.current) return
+      stopAmbientPadSmoothly()
+      setAudioError('Audio could not start. Check your audio output and try again.')
     }
+  }
 
-    const masterGain = ctx.createGain()
-    masterGain.gain.setValueAtTime(0.0001, ctx.currentTime)
-    masterGain.gain.linearRampToValueAtTime(volume * 0.28, ctx.currentTime + 2.2)
+  const togglePadKey = (keyName: string, rootFreq: number): void => {
+    if (activePadRef.current === keyName) {
+      stopAmbientPadSmoothly()
+    } else {
+      void startPad(keyName, rootFreq, padSoundId)
+    }
+  }
 
-    // Warm low-pass filter so the worship pad sounds like a lush analog synth pad
-    const filter = ctx.createBiquadFilter()
-    filter.type = 'lowpass'
-    filter.frequency.setValueAtTime(520, ctx.currentTime)
-
-    filter.connect(masterGain)
-    masterGain.connect(ctx.destination)
-
-    // Root + Fifth + Octave warm worship drone chord (never clashes with major/minor!)
-    const ratios = [1, 1.498, 2, 2.005]
-    const oscs = ratios.map((ratio, idx) => {
-      const osc = ctx.createOscillator()
-      osc.type = idx % 2 === 0 ? 'sine' : 'triangle'
-      osc.frequency.setValueAtTime(rootFreq * ratio, ctx.currentTime)
-      osc.connect(filter)
-      osc.start()
-      return osc
-    })
-
-    padGainRef.current = masterGain
-    padOscsRef.current = oscs
-    setActivePadKey(keyName)
+  const changePadSound = (soundId: string): void => {
+    setPadSoundId(soundId)
+    const key = PAD_KEYS.find((key) => key.key === activePadRef.current)
+    if (key) void startPad(key.key, key.freq, soundId)
   }
 
   useEffect(() => {
-    if (padGainRef.current && audioCtxRef.current) {
-      padGainRef.current.gain.setTargetAtTime(
-        volume * 0.28,
-        audioCtxRef.current.currentTime,
-        0.2
-      )
-    }
+    padEngineRef.current?.setVolume(volume)
     if (htmlAudioRef.current) {
       htmlAudioRef.current.volume = volume
     }
@@ -111,7 +81,15 @@ export const AudioBinDrawer: React.FC<AudioBinDrawerProps> = ({
 
   useEffect(() => {
     return () => {
-      stopAmbientPadSmoothly()
+      padRequestRef.current++
+      activePadRef.current = null
+      const engine = padEngineRef.current
+      const ctx = audioCtxRef.current
+      padEngineRef.current = null
+      audioCtxRef.current = null
+      engine?.stop()
+      // Let the fade and reverb finish before releasing the audio device.
+      if (ctx) setTimeout(() => { engine?.dispose(); void ctx.close().catch(() => {}) }, 7600)
       htmlAudioRef.current?.pause()
     }
   }, [])
@@ -153,7 +131,8 @@ export const AudioBinDrawer: React.FC<AudioBinDrawerProps> = ({
           <Volume2 className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
           <input
             type="range"
-            min={0.05}
+            aria-label="Audio volume"
+            min={0}
             max={1}
             step={0.05}
             value={volume}
@@ -167,7 +146,7 @@ export const AudioBinDrawer: React.FC<AudioBinDrawerProps> = ({
       <div className="p-3 rounded-lg bg-[#18191c] border border-[#32353e] space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold text-zinc-200">
-            Instant Ambient Prayer Pad
+            Worship Ambient Pads
           </span>
           {activePadKey && (
             <button
@@ -179,8 +158,17 @@ export const AudioBinDrawer: React.FC<AudioBinDrawerProps> = ({
           )}
         </div>
         <p className="text-[10px] text-zinc-400">
-          Smooth synth pad for prayer, transitions, or speaking (fades in/out gently). Sharps and flats share the same pitch:
+          Choose a sound and key. Changing either crossfades gently; click the playing key to fade out.
         </p>
+        <label className="block text-[10px] font-semibold text-zinc-400 space-y-1">
+          <span>Pad sound</span>
+          <select aria-label="Pad sound" value={padSoundId} onChange={(event) => changePadSound(event.target.value)}
+            className="w-full rounded bg-[#262930] border border-[#42454e] px-2 py-2 text-xs text-white focus:outline-none focus:border-orange-500">
+            {PAD_SOUNDS.map((sound) => <option key={sound.id} value={sound.id}>{sound.name}</option>)}
+          </select>
+        </label>
+        <p className="text-[10px] text-zinc-400">{PAD_SOUNDS.find((sound) => sound.id === padSoundId)?.description}</p>
+        <p className="text-[10px] text-zinc-500">Root, fifth and octaves suit major or minor songs. Sharp/flat pairs share a pitch.</p>
         <div role="group" aria-label="Prayer pad keys" className="grid grid-cols-4 gap-1.5">
           {PAD_KEYS.map(({ key, label, freq }) => {
             const isPlaying = activePadKey === key

@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Check, Plus, SplitSquareVertical, Trash2 } from 'lucide-react'
 import { SongSlidePreview } from './SongSlidePreview'
+import { SongKeySelect } from './SongKeySelect'
 import { LivePresentationState, OutputProfile, SectionType, Song, SongInput, SongSection } from '@shared/types'
 import { getProPresenterBarColor } from './SongEditorView'
 
@@ -9,6 +10,8 @@ interface ReflowEditorViewProps {
   previewProfile?: OutputProfile
   liveState: LivePresentationState
   onSave: (input: SongInput) => Promise<void>
+  onUseTemporarily: (input: SongInput) => Promise<void>
+  onDiscard: () => void
   onSwitchToShow: () => void
 }
 
@@ -26,6 +29,8 @@ export const ReflowEditorView: React.FC<ReflowEditorViewProps> = ({
   previewProfile,
   liveState,
   onSave,
+  onUseTemporarily,
+  onDiscard,
   onSwitchToShow
 }) => {
   const [titlePrimary, setTitlePrimary] = useState(song?.titlePrimary ?? 'New Worship Song')
@@ -45,6 +50,7 @@ export const ReflowEditorView: React.FC<ReflowEditorViewProps> = ({
     song?.arrangement ?? sections.map((s) => s.id)
   )
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   const addSection = (type: SectionType): void => {
     const count = sections.filter((s) => s.type === type).length + 1
@@ -75,9 +81,11 @@ export const ReflowEditorView: React.FC<ReflowEditorViewProps> = ({
     )
   }
 
-  const handleSave = async (): Promise<void> => {
+  const handleSave = async (temporary = false): Promise<void> => {
     setSaving(true)
-    await onSave({
+    setError('')
+    try {
+    await (temporary ? onUseTemporarily : onSave)({
       id: song?.id,
       titlePrimary: titlePrimary.trim() || 'Untitled Song',
       titleSecondary: titleSecondary.trim(),
@@ -87,15 +95,17 @@ export const ReflowEditorView: React.FC<ReflowEditorViewProps> = ({
       sections,
       arrangement: arrangement.length > 0 ? arrangement : sections.map((s) => s.id)
     })
-    setSaving(false)
     onSwitchToShow()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not apply song edits.')
+    } finally { setSaving(false) }
   }
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-[#1e1f23]">
       {/* Reflow Sub-Toolbar */}
-      <div className="px-4 py-2 bg-[#26282e] border-b border-[#343740] flex items-center justify-between gap-3 shrink-0">
-        <div className="flex items-center gap-2.5">
+      <div className="px-4 py-2 bg-[#26282e] border-b border-[#343740] flex flex-wrap items-center justify-between gap-3 shrink-0">
+        <div className="flex flex-wrap items-center gap-2.5">
           <input
             value={titlePrimary}
             onChange={(e) => setTitlePrimary(e.target.value)}
@@ -108,6 +118,11 @@ export const ReflowEditorView: React.FC<ReflowEditorViewProps> = ({
             placeholder="Secondary Title (English/VN)"
             className="px-2.5 py-1 rounded bg-[#17181c] border border-[#3a3d47] text-xs text-amber-200 w-52"
           />
+          <label className="flex items-center gap-2 text-xs text-zinc-300">
+            Key
+            <SongKeySelect value={musicalKey} onChange={setMusicalKey}
+              className="w-28 px-2.5 py-1 rounded bg-[#17181c] border border-[#3a3d47] text-xs font-mono text-white" />
+          </label>
           <div className="flex items-center gap-1 ml-2">
             {(['Verse', 'Chorus', 'Bridge', 'Tag'] as SectionType[]).map((t) => (
               <button
@@ -123,8 +138,12 @@ export const ReflowEditorView: React.FC<ReflowEditorViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          <button disabled={saving} onClick={onDiscard}
+            className="px-3 py-1.5 rounded bg-[#32353f] text-xs text-zinc-200">Don’t Save</button>
+          {song && <button disabled={saving} onClick={() => void handleSave(true)}
+            className="px-3 py-1.5 rounded bg-[#32353f] text-xs text-cyan-300">Use Temporarily</button>}
           <button
-            onClick={handleSave}
+            onClick={() => void handleSave()}
             disabled={saving}
             className="px-4 py-1.5 rounded bg-orange-500 hover:bg-orange-400 text-white text-xs font-bold flex items-center gap-1.5"
           >
@@ -132,6 +151,10 @@ export const ReflowEditorView: React.FC<ReflowEditorViewProps> = ({
             {saving ? 'Saving...' : 'Save & Return to Show'}
           </button>
         </div>
+      </div>
+      <div className="px-4 py-2 text-xs text-zinc-400 border-b border-[#343740]">
+        Temporary edits stay in this session. Only Save queues song changes for sync.
+        {error && <p role="alert" className="text-red-300 mt-1">{error}</p>}
       </div>
 
       {/* ProPresenter Reflow Split View: Left = Text Flow | Right = Live Slide Preview Grid */}

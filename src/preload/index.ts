@@ -8,6 +8,7 @@ import {
   LivePresentationState,
   MediaAsset,
   MediaBin,
+  MediaStorageStatus,
   OutputProfile,
   ServiceItem,
   Song,
@@ -17,6 +18,8 @@ import {
 interface LibraryPayload { songs: Song[]; serviceItems: ServiceItem[]; status: SongSyncStatus }
 
 const nscApi = {
+  mediaStorageStatus: (): Promise<MediaStorageStatus> => ipcRenderer.invoke('nsc:media-storage-status'),
+  chooseMediaFolder: (): Promise<(MediaStorageStatus & { copied: number }) | null> => ipcRenderer.invoke('nsc:choose-media-folder'),
   libraryStatus: (): Promise<SongSyncStatus> => ipcRenderer.invoke('nsc:library-status'),
   configureLibrary: (config: LibraryConfig): Promise<SongSyncStatus> => ipcRenderer.invoke('nsc:library-configure', config),
   librarySignIn: (email: string, password: string): Promise<SongSyncStatus> => ipcRenderer.invoke('nsc:library-sign-in', email, password),
