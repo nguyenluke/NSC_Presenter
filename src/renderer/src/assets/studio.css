@@ -49,3 +49,101 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #3b4764;
 }
+
+/* Compact, neutral studio chrome. Output canvases retain their own typography. */
+.nsc-studio {
+  --studio-panel: #242529;
+  --studio-border: #151619;
+  --studio-selected: #3675d3;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.studio-toolbar {
+  background: linear-gradient(#303136, #292a2e);
+  box-shadow: inset 0 1px 0 #ffffff08;
+  gap: 12px;
+}
+
+.studio-toolbar-tools,
+.studio-toolbar-outputs { flex-shrink: 0; }
+
+.studio-toolbar-tools > button {
+  min-width: 48px;
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+
+.studio-toolbar-tools > button[aria-expanded='true'] {
+  background: #45464c;
+  border-color: #55565d;
+}
+
+.studio-toolbar-tools > button > svg { width: 19px; height: 19px; }
+.studio-toolbar-tools > button > span { font-weight: 500; }
+.studio-mode-switch { border-radius: 5px; padding: 2px; flex-shrink: 0; }
+.studio-mode-switch > button { border-radius: 3px; }
+.studio-sidebar { background: #25262a; }
+.studio-deck { background: #1c1d20; }
+.studio-slide-card { position: relative; isolation: isolate; border: 1px solid #3b3d44; border-radius: 3px; box-shadow: 0 1px 3px #0005; transition: none; }
+.studio-slide-card:hover { border-color: #8b8d96; }
+.studio-slide-card::after { content: ''; position: absolute; inset: 0; z-index: 60; border: 3px solid transparent; border-radius: inherit; pointer-events: none; }
+.studio-slide-card[data-selected='true']::after { border-color: #ff6b00; }
+.studio-slide-card[data-selected='true'] { border-color: #ff6b00; box-shadow: 0 0 0 1px #ff6b00, 0 0 14px #ff6b0033; }
+.studio-slide-row[data-selected='true'] { box-shadow: inset 0 0 0 2px #ff6b00; }
+.studio-message-input { min-height: 88px; max-height: 220px; resize: vertical; }
+.studio-slide-card:focus-visible { outline: 2px solid #86b7ff; outline-offset: 5px; }
+.studio-inspector { background: #26272b; }
+.studio-clear-stack > button { border-radius: 3px; min-height: 28px; }
+.studio-preview-panel { background: #202125; }
+.studio-media-bin { min-height: 152px; }
+.studio-media-bin > div:first-child { width: 172px; }
+
+.studio-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  z-index: 60;
+  background: #2c2d31;
+  border: 1px solid #505158;
+  border-radius: 6px;
+  box-shadow: 0 16px 38px #0009, 0 2px 5px #0006;
+  color: #e5e7eb;
+  max-height: calc(100vh - 84px);
+  overflow-y: auto;
+}
+
+.studio-theme-picker { left: 96px; width: 390px; }
+.studio-text-popover { left: 48px; width: 302px; }
+.studio-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-bottom: 1px solid #191a1d;
+  font-size: 12px;
+  font-weight: 600;
+  background: #323338;
+}
+.studio-icon-button { padding: 3px; color: #a1a1aa; border-radius: 3px; }
+.studio-icon-button:hover { background: #ffffff12; color: white; }
+.studio-theme-card { overflow: hidden; text-align: left; border: 1px solid #505158; border-radius: 3px; background: #25262a; }
+.studio-theme-card:hover { border-color: #9ca3af; }
+.studio-theme-card.is-selected { border-color: #5598ff; box-shadow: 0 0 0 1px #5598ff; }
+.studio-theme-card:disabled { cursor: wait; }
+.studio-field { border-radius: 3px; border: 1px solid #505158; background: #202125; color: #e5e7eb; padding: 6px 8px; font-size: 11px; }
+.studio-field-label { font-size: 11px; color: #b5b6be; margin-bottom: 6px; }
+.studio-segmented { background: #1c1d20; border: 1px solid #17181a; border-radius: 4px; padding: 2px; gap: 2px; }
+.studio-segmented > button { display: flex; align-items: center; justify-content: center; gap: 5px; padding: 7px 3px; border-radius: 2px; font-size: 11px; color: #a9abb4; }
+.studio-segmented > button:hover { background: #35363c; color: white; }
+.studio-segmented > button[aria-pressed='true'] { background: #477cc2; color: white; box-shadow: inset 0 1px 0 #ffffff16; }
+.studio-color-input { width: 30px; height: 23px; border: 1px solid #55565d; border-radius: 3px; background: #202125; padding: 2px; cursor: pointer; }
+
+@media (max-width: 1270px) {
+  .studio-toolbar { gap: 5px; padding-right: 6px; }
+  .studio-toolbar-tools { gap: 0; }
+  .studio-toolbar-tools > button { padding-left: 7px; padding-right: 7px; min-width: 42px; }
+  .studio-mode-switch > button { padding-left: 8px; padding-right: 8px; }
+  .studio-toolbar-outputs { gap: 7px; }
+  .studio-sidebar { width: 208px; }
+  .studio-inspector { width: 306px; }
+}

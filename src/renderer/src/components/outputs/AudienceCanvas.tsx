@@ -1,12 +1,13 @@
-import React from 'react'
+import React, { useLayoutEffect, useRef, useState } from 'react'
 import { LivePresentationState, MediaAsset, OutputProfile } from '@shared/types'
 
 interface AudienceCanvasProps {
   liveState: LivePresentationState
   profile: OutputProfile
+  staticMedia?: boolean
 }
 
-function MediaLayer({ asset }: { asset: MediaAsset | null }): React.ReactElement | null {
+function MediaLayer({ asset, staticMedia = false }: { asset: MediaAsset | null; staticMedia?: boolean }): React.ReactElement | null {
   if (!asset) return null
 
   if (asset.mediaType === 'atmosphere') {
@@ -23,7 +24,8 @@ function MediaLayer({ asset }: { asset: MediaAsset | null }): React.ReactElement
       <video
         key={asset.url}
         src={asset.url}
-        autoPlay
+        autoPlay={!staticMedia}
+        preload={staticMedia ? 'metadata' : 'auto'}
         loop
         muted
         playsInline
@@ -44,7 +46,19 @@ function MediaLayer({ asset }: { asset: MediaAsset | null }): React.ReactElement
   )
 }
 
-export const AudienceCanvas: React.FC<AudienceCanvasProps> = ({ liveState, profile }) => {
+export const AudienceCanvas: React.FC<AudienceCanvasProps> = ({ liveState, profile, staticMedia = false }) => {
+  const noticeRef = useRef<HTMLDivElement>(null)
+  const [noticeBottom, setNoticeBottom] = useState(0)
+  useLayoutEffect(() => {
+    const notice = noticeRef.current
+    if (!notice) { setNoticeBottom(0); return }
+    const measure = (): void => setNoticeBottom(notice.offsetTop + notice.offsetHeight)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(notice)
+    return () => observer.disconnect()
+  }, [liveState.audienceMessage, liveState.blackout])
+
   const showBg = !liveState.clearBackground && !liveState.blackout
   const showForegroundGraphic = Boolean(liveState.foregroundMedia) && !liveState.blackout
   const showLyrics =
@@ -70,7 +84,7 @@ export const AudienceCanvas: React.FC<AudienceCanvasProps> = ({ liveState, profi
           showBg ? 'opacity-100' : 'opacity-0'
         }`}
       >
-        <MediaLayer asset={liveState.activeBackground} />
+        <MediaLayer staticMedia={staticMedia} asset={liveState.activeBackground} />
       </div>
 
       {/* LAYER 2A: Readability Scrim */}
@@ -87,13 +101,17 @@ export const AudienceCanvas: React.FC<AudienceCanvasProps> = ({ liveState, profi
           showForegroundGraphic ? 'opacity-100 z-20' : 'opacity-0 pointer-events-none'
         }`}
       >
-        <MediaLayer asset={liveState.foregroundMedia} />
+        <MediaLayer staticMedia={staticMedia} asset={liveState.foregroundMedia} />
       </div>
 
       {/* LAYER 3: Dual-Language Worship / Scripture Lyrics Compositor */}
       <div
+        data-text-position={profile.verticalAlign}
+        style={{ paddingTop: profile.verticalAlign === 'top' ? Math.max(96, noticeBottom ? noticeBottom + 32 : 96) : undefined }}
         className={`absolute inset-0 z-10 flex flex-col px-28 transition-opacity duration-200 ${
-          profile.verticalAlign === 'bottom' ? 'justify-end pb-24' : 'justify-center'
+          profile.verticalAlign === 'top'
+            ? 'justify-start'
+            : profile.verticalAlign === 'bottom' ? 'justify-end pb-24' : 'justify-center'
         } ${showLyrics ? 'opacity-100' : 'opacity-0'}`}
       >
         {slide && (
@@ -131,9 +149,9 @@ export const AudienceCanvas: React.FC<AudienceCanvasProps> = ({ liveState, profi
 
       {/* LAYER 3.5: ProPresenter Audience Message / Childcare Ticker Banner (Top Ribbon) */}
       {liveState.audienceMessage.trim() !== '' && !liveState.blackout && (
-        <div className="absolute top-8 inset-x-20 z-30 flex justify-center">
-          <div className="px-10 py-4 rounded-2xl bg-black/80 border-2 border-amber-400/70 backdrop-blur-md shadow-2xl">
-            <p className="text-4xl font-bold text-amber-200 tracking-wide text-center">
+        <div ref={noticeRef} className="absolute top-8 inset-x-20 z-30 flex justify-center">
+          <div className="max-w-full px-10 py-4 rounded-2xl bg-black/80 border-2 border-amber-400/70 backdrop-blur-md shadow-2xl">
+            <p className="text-4xl font-bold text-amber-200 tracking-wide text-center whitespace-pre-line break-words">
               {liveState.audienceMessage}
             </p>
           </div>
@@ -149,7 +167,7 @@ export const AudienceCanvas: React.FC<AudienceCanvasProps> = ({ liveState, profi
         }`}
       >
         {liveState.logoMedia && liveState.logoMedia.mediaType !== 'atmosphere' ? (
-          <MediaLayer asset={liveState.logoMedia} />
+          <MediaLayer staticMedia={staticMedia} asset={liveState.logoMedia} />
         ) : (
           <div
             className="w-full h-full flex flex-col items-center justify-center"

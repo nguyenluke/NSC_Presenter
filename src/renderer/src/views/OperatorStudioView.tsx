@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlignLeft,
   ArrowDown,
@@ -6,6 +6,7 @@ import {
   BookMarked,
   BookOpen,
   Clock,
+  Cloud,
   Edit3,
   Eraser,
   Film,
@@ -34,12 +35,18 @@ import {
   Volume2,
   X
 } from 'lucide-react'
-import { LanguageMode, MediaBin, Song } from '@shared/types'
+import { MediaBin, OutputProfile, Song } from '@shared/types'
 import { ScaledMonitorFrame } from '../components/outputs/ScaledMonitorFrame'
 import { formatTimerSeconds } from '../components/outputs/StageMonitorCanvas'
 import { AudioBinDrawer } from '../components/studio/AudioBinDrawer'
 import { BibleView } from '../components/studio/BibleView'
 import { DisplayMatrixModal } from '../components/studio/DisplayMatrixModal'
+import { ThemePicker } from '../components/studio/ThemePicker'
+import { TextFormattingPopover } from '../components/studio/TextFormattingPopover'
+import { SongSlidePreview } from '../components/studio/SongSlidePreview'
+import { PresentationTheme } from '../components/studio/presentationThemes'
+import { SharedLibraryModal } from '../components/studio/SharedLibraryModal'
+import { MediaStorageModal } from '../components/studio/MediaStorageModal'
 import { QuickSearchModal } from '../components/studio/QuickSearchModal'
 import { ReflowEditorView } from '../components/studio/ReflowEditorView'
 import { getProPresenterBarColor, SongEditorView } from '../components/studio/SongEditorView'
@@ -54,7 +61,8 @@ export const OperatorStudioView: React.FC = () => {
   const {
     initialized,
     bootstrap,
-    songs,
+    songs: savedSongs,
+    temporarySongs,
     mediaAssets,
     audioTracks,
     serviceItems,
@@ -76,6 +84,8 @@ export const OperatorStudioView: React.FC = () => {
     triggerForegroundGraphic,
     updateLiveFlags,
     saveSong,
+    useSongTemporarily,
+    discardTemporarySong,
     deleteSong,
     addToService,
     removeFromService,
@@ -92,11 +102,25 @@ export const OperatorStudioView: React.FC = () => {
     exportBackup,
     importBackup
   } = useStudioStore()
+  const songs = useMemo(() => savedSongs.map((song) => temporarySongs[song.id] ?? song),
+    [savedSongs, temporarySongs])
+  const [songActionBusy, setSongActionBusy] = useState(false)
+  const [songActionError, setSongActionError] = useState('')
+  const runSongAction = async (action: () => Promise<unknown>): Promise<void> => {
+    setSongActionBusy(true)
+    setSongActionError('')
+    try { await action() }
+    catch (err) { setSongActionError(err instanceof Error ? err.message : 'Could not apply song edits.') }
+    finally { setSongActionBusy(false) }
+  }
 
   // 1. ProPresenter Toolbar States
   const [centerMode, setCenterMode] = useState<CenterMode>('show')
   const [editingSong, setEditingSong] = useState<Song | null>(null)
+  const [showSharedLibrary, setShowSharedLibrary] = useState(false)
+  const [showMediaStorage, setShowMediaStorage] = useState(false)
   const [showSearchModal, setShowSearchModal] = useState(false)
+  const toolbarPopoverRef = useRef<HTMLDivElement>(null)
   const [showTextPopover, setShowTextPopover] = useState(false)
   const [showThemePopover, setShowThemePopover] = useState(false)
   const [showDisplayMatrix, setShowDisplayMatrix] = useState(false)
@@ -121,9 +145,30 @@ export const OperatorStudioView: React.FC = () => {
     }
   }, [initialized, bootstrap])
 
+  useEffect(() => {
+    if (!showTextPopover && !showThemePopover) return
+    const dismiss = (event: PointerEvent): void => {
+      if (!toolbarPopoverRef.current?.contains(event.target as Node)) {
+        setShowTextPopover(false)
+        setShowThemePopover(false)
+      }
+    }
+    document.addEventListener('pointerdown', dismiss)
+    return () => document.removeEventListener('pointerdown', dismiss)
+  }, [showTextPopover, showThemePopover])
+
   // Global Booth Keyboard Shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
+      if (showSharedLibrary || showMediaStorage) return
+      if (showTextPopover || showThemePopover) {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          setShowTextPopover(false)
+          setShowThemePopover(false)
+        }
+        return
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
         e.preventDefault()
         setShowSearchModal(true)
@@ -172,6 +217,10 @@ export const OperatorStudioView: React.FC = () => {
   }, [
     centerMode,
     showDisplayMatrix,
+    showSharedLibrary,
+    showMediaStorage,
+    showTextPopover,
+    showThemePopover,
     showSearchModal,
     liveState,
     stepSlide,
@@ -240,51 +289,18 @@ export const OperatorStudioView: React.FC = () => {
     }
   }
 
-  const applyQuickThemePreset = async (
-    preset: 'sanctuary' | 'lowerThird' | 'vnOnly' | 'bilingualCyan'
-  ): Promise<void> => {
-    for (const p of audienceProfiles) {
-      if (preset === 'sanctuary') {
-        await saveOutputProfile({
-          ...p,
-          languageMode: 'both',
-          verticalAlign: 'center',
-          primaryFontSize: 64,
-          secondaryFontSize: 42,
-          primaryColor: '#FFFFFF',
-          secondaryColor: '#FCD34D'
-        })
-      } else if (preset === 'lowerThird') {
-        await saveOutputProfile({
-          ...p,
-          languageMode: 'both',
-          verticalAlign: 'bottom',
-          primaryFontSize: 48,
-          secondaryFontSize: 34
-        })
-      } else if (preset === 'vnOnly') {
-        await saveOutputProfile({
-          ...p,
-          languageMode: 'primary',
-          verticalAlign: 'center',
-          primaryFontSize: 72
-        })
-      } else if (preset === 'bilingualCyan') {
-        await saveOutputProfile({
-          ...p,
-          languageMode: 'both',
-          verticalAlign: 'center',
-          primaryColor: '#FFFFFF',
-          secondaryColor: '#67E8F9'
-        })
-      }
+  const applyQuickThemePreset = async (theme: PresentationTheme): Promise<void> => {
+    for (const profile of audienceProfiles) {
+      await saveOutputProfile({ ...profile, ...theme.settings })
     }
     setShowThemePopover(false)
   }
 
-  const updateAudienceLanguageMode = async (mode: LanguageMode): Promise<void> => {
-    for (const p of audienceProfiles) {
-      await saveOutputProfile({ ...p, languageMode: mode })
+  const updateAudienceFormatting = async (target: string, patch: Partial<OutputProfile>): Promise<void> => {
+    const currentProfiles = useStudioStore.getState().outputProfiles
+    for (const profile of currentProfiles.filter((item) => item.screenType === 'audience' &&
+      (target === 'all' || item.id === target))) {
+      await saveOutputProfile({ ...profile, ...patch })
     }
   }
 
@@ -297,17 +313,17 @@ export const OperatorStudioView: React.FC = () => {
   }
 
   return (
-    <div className="w-screen h-screen bg-[#1e1f22] text-zinc-100 flex flex-col overflow-hidden select-none">
+    <div className="nsc-studio w-screen h-screen bg-[#1e1f22] text-zinc-100 flex flex-col overflow-hidden select-none">
       {/* =====================================================================
           ZONE 1: OFFICIAL PROPRESENTER 7 TOP TOOLBAR
          ===================================================================== */}
       <header
-        className={`h-[56px] bg-[#2b2d31] border-b border-[#141517] flex items-center justify-between px-3 app-drag-region shrink-0 relative z-30 ${
+        className={`studio-toolbar h-[60px] bg-[#2b2d31] border-b border-[#141517] flex items-center justify-between px-3 app-drag-region shrink-0 relative z-30 ${
           isMac ? 'pl-20' : 'pl-3'
         }`}
       >
         {/* LEFT GROUP: Search | Text | Theme | + New Song */}
-        <div className="flex items-center gap-1 app-no-drag relative">
+        <div ref={toolbarPopoverRef} className="studio-toolbar-tools flex items-center gap-1 app-no-drag relative">
           <button
             onClick={() => setShowSearchModal(true)}
             className="px-3 py-1 rounded hover:bg-[#383a40] flex flex-col items-center gap-0.5 text-zinc-200"
@@ -318,6 +334,9 @@ export const OperatorStudioView: React.FC = () => {
           </button>
 
           <button
+            aria-label="Text formatting"
+            title="Text: manually adjust text size, color, language, and position"
+            aria-expanded={showTextPopover}
             onClick={() => {
               setShowTextPopover(!showTextPopover)
               setShowThemePopover(false)
@@ -331,6 +350,9 @@ export const OperatorStudioView: React.FC = () => {
           </button>
 
           <button
+            aria-label="Slide themes"
+            title="Theme: apply a complete saved look to all audience screens"
+            aria-expanded={showThemePopover}
             onClick={() => {
               setShowThemePopover(!showThemePopover)
               setShowTextPopover(false)
@@ -356,91 +378,18 @@ export const OperatorStudioView: React.FC = () => {
             <span className="text-[10px] font-medium text-zinc-300">New Song</span>
           </button>
 
-          {showTextPopover && firstAudienceProfile && (
-            <div className="absolute left-12 top-14 w-64 p-3 rounded-lg bg-[#2b2d31] border border-[#454852] shadow-2xl space-y-3 z-50">
-              <div className="text-[11px] font-bold uppercase text-zinc-400">
-                Quick Lyric Formatting
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs text-zinc-300">Languages on Audience Screens:</label>
-                <div className="grid grid-cols-3 gap-1">
-                  {(
-                    [
-                      ['both', 'Both'],
-                      ['primary', 'Lang 1'],
-                      ['secondary', 'Lang 2']
-                    ] as const
-                  ).map(([mode, label]) => (
-                    <button
-                      key={mode}
-                      onClick={() => updateAudienceLanguageMode(mode)}
-                      className={`py-1 rounded text-xs font-semibold ${
-                        firstAudienceProfile.languageMode === mode
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-[#1e1f22] text-zinc-300'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs text-zinc-300">
-                  Main Lyric Size: {firstAudienceProfile.primaryFontSize}px
-                </label>
-                <input
-                  type="range"
-                  min={36}
-                  max={96}
-                  value={firstAudienceProfile.primaryFontSize}
-                  onChange={(e) =>
-                    saveOutputProfile({
-                      ...firstAudienceProfile,
-                      primaryFontSize: Number(e.target.value)
-                    })
-                  }
-                  className="w-full accent-orange-500"
-                />
-              </div>
-            </div>
+          {showTextPopover && (
+            <TextFormattingPopover profiles={audienceProfiles} onChange={updateAudienceFormatting}
+              onClose={() => setShowTextPopover(false)} />
           )}
-
           {showThemePopover && (
-            <div className="absolute left-24 top-14 w-64 p-2 rounded-lg bg-[#2b2d31] border border-[#454852] shadow-2xl space-y-1 z-50">
-              <div className="px-2 py-1 text-[11px] font-bold uppercase text-zinc-400">
-                ProPresenter Slide Themes
-              </div>
-              <button
-                onClick={() => applyQuickThemePreset('sanctuary')}
-                className="w-full text-left px-3 py-2 rounded hover:bg-[#383b42] text-xs font-semibold text-white"
-              >
-                Center Bilingual (White + Gold)
-              </button>
-              <button
-                onClick={() => applyQuickThemePreset('bilingualCyan')}
-                className="w-full text-left px-3 py-2 rounded hover:bg-[#383b42] text-xs font-semibold text-cyan-200"
-              >
-                Modern Bilingual (White + Ice Blue)
-              </button>
-              <button
-                onClick={() => applyQuickThemePreset('lowerThird')}
-                className="w-full text-left px-3 py-2 rounded hover:bg-[#383b42] text-xs font-semibold text-zinc-200"
-              >
-                Lower-Third Broadcast (Bottom)
-              </button>
-              <button
-                onClick={() => applyQuickThemePreset('vnOnly')}
-                className="w-full text-left px-3 py-2 rounded hover:bg-[#383b42] text-xs font-semibold text-zinc-200"
-              >
-                Single Language Extra-Bold
-              </button>
-            </div>
+            <ThemePicker profile={audienceProfiles[0]} liveState={liveState} onApply={applyQuickThemePreset}
+              onClose={() => setShowThemePopover(false)} />
           )}
         </div>
 
         {/* CENTER GROUP: Show | Edit | Reflow | Bible | Screens */}
-        <div className="flex items-center bg-[#1b1c1f] p-1 rounded-lg border border-[#383a40] app-no-drag">
+        <div className="studio-mode-switch flex items-center bg-[#1b1c1f] p-1 rounded-lg border border-[#383a40] app-no-drag">
           <button
             onClick={() => setCenterMode('show')}
             className={`px-3.5 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${
@@ -505,7 +454,7 @@ export const OperatorStudioView: React.FC = () => {
         </div>
 
         {/* RIGHT GROUP: Media Bin Toggle + Audience & Stage Master Switches */}
-        <div className="flex items-center gap-2.5 app-no-drag">
+        <div className="studio-toolbar-outputs flex items-center gap-2.5 app-no-drag">
           <button
             onClick={() => {
               setCenterMode('show')
@@ -602,10 +551,21 @@ export const OperatorStudioView: React.FC = () => {
       {/* =====================================================================
           MAIN WORKSPACE ROUTING: Edit | Reflow | Show + Bible + Right Preview
          ===================================================================== */}
+      {songActionError && <p role="alert" className="px-4 py-2 text-xs text-red-300">{songActionError}</p>}
       {centerMode === 'edit' ? (
         <SongEditorView
+          key={editingSong?.id ?? 'new'}
           initialSong={editingSong}
-          onCancel={() => setCenterMode('show')}
+          previewProfile={audienceProfiles[0]}
+          liveState={liveState}
+          onCancel={() => void runSongAction(async () => {
+            if (editingSong) await discardTemporarySong(editingSong.id)
+            setCenterMode('show')
+          })}
+          onUseTemporarily={async (input) => {
+            await useSongTemporarily(input)
+            setCenterMode('show')
+          }}
           onSave={async (input) => {
             await saveSong(input)
             setCenterMode('show')
@@ -613,10 +573,18 @@ export const OperatorStudioView: React.FC = () => {
         />
       ) : centerMode === 'reflow' ? (
         <ReflowEditorView
+          key={selectedSong?.id ?? 'new'}
           song={selectedSong}
+          previewProfile={audienceProfiles[0]}
+          liveState={liveState}
           onSave={async (input) => {
             await saveSong(input)
           }}
+          onUseTemporarily={useSongTemporarily}
+          onDiscard={() => void runSongAction(async () => {
+            if (selectedSong) await discardTemporarySong(selectedSong.id)
+            setCenterMode('show')
+          })}
           onSwitchToShow={() => setCenterMode('show')}
         />
       ) : (
@@ -636,7 +604,7 @@ export const OperatorStudioView: React.FC = () => {
           ) : (
             <>
               {/* ZONE 2: LEFT SIDEBAR (Libraries Top + Playlists Bottom with Up/Down Reorder) */}
-              <aside className="w-[256px] bg-[#232428] border-r border-[#141517] flex flex-col min-h-0 shrink-0">
+              <aside className="studio-sidebar w-[228px] bg-[#232428] border-r border-[#141517] flex flex-col min-h-0 shrink-0">
                 <div className="h-[52%] flex flex-col min-h-0 border-b border-[#141517]">
                   <div className="px-3 py-1.5 bg-[#2b2d31] border-b border-[#191a1d] flex items-center justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
@@ -658,7 +626,10 @@ export const OperatorStudioView: React.FC = () => {
                       <BookOpen className="w-3.5 h-3.5 text-blue-400" />
                       Worship Songs
                     </span>
-                    <span className="text-[10px] text-zinc-400">{songs.length}</span>
+                    <div className="flex items-center gap-2">
+                      <button title="Shared song library" aria-label="Open shared song library" onClick={() => setShowSharedLibrary(true)} className="text-blue-400 hover:text-blue-200"><Cloud className="w-3.5 h-3.5" /></button>
+                      <span className="text-[10px] text-zinc-400">{songs.length}</span>
+                    </div>
                   </div>
 
                   <div className="p-1.5 border-b border-[#1d1e22]">
@@ -831,7 +802,16 @@ export const OperatorStudioView: React.FC = () => {
               </aside>
 
               {/* ZONE 3 & 4: CENTER SLIDE CANVAS + MEDIA BIN */}
-              <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#18191b]">
+              <main className="studio-deck flex-1 flex flex-col min-w-0 min-h-0 bg-[#18191b]">
+                {selectedSong && temporarySongs[selectedSong.id] && (
+                  <div role="status" className="px-4 py-2 bg-cyan-950/50 border-b border-cyan-700/40 flex items-center gap-3 flex-wrap text-xs">
+                    <span className="text-cyan-200 flex-1">Temporary song edits — not saved or queued for sync. Closing the app discards them.</span>
+                    <button disabled={songActionBusy} onClick={() => void runSongAction(() => saveSong(selectedSong))}
+                      className="rounded bg-orange-500 px-3 py-1 font-semibold text-white disabled:opacity-40">Save Song</button>
+                    <button disabled={songActionBusy} onClick={() => void runSongAction(() => discardTemporarySong(selectedSong.id))}
+                      className="rounded bg-[#32353d] px-3 py-1 font-semibold text-zinc-200 disabled:opacity-40">Don’t Save</button>
+                  </div>
+                )}
                 {selectedSong && (
                   <div className="px-4 py-2 bg-[#232529] border-b border-[#141517] flex items-center justify-between gap-3 shrink-0">
                     <div className="flex items-center gap-3 min-w-0 flex-wrap">
@@ -891,36 +871,24 @@ export const OperatorStudioView: React.FC = () => {
                       <div
                         className="grid gap-3.5"
                         style={{
-                          gridTemplateColumns: `repeat(auto-fill, minmax(${slideCardWidth}px, 1fr))`
+                          gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${slideCardWidth}px), 1fr))`
                         }}
                       >
                         {deckSlides.map((cue) => {
-                          const isLive =
+                          const isChosen =
                             liveState.activeSongId === selectedSong.id &&
-                            liveState.activeSlideGlobalIndex === cue.globalIndex &&
-                            !liveState.clearText &&
-                            !liveState.blackout
+                            liveState.activeSlideGlobalIndex === cue.globalIndex
 
                           return (
                             <button
                               key={`${cue.id}-${cue.globalIndex}`}
+                              aria-pressed={isChosen}
+                              data-selected={isChosen}
+                              aria-label={`Show slide ${cue.globalIndex + 1}: ${cue.sectionLabel}`}
                               onClick={() => triggerSlide(selectedSong, cue.globalIndex)}
-                              className={`text-left rounded overflow-hidden bg-black flex flex-col transition-all ${
-                                isLive
-                                  ? 'ring-[3px] ring-[#ff6b00] shadow-[0_0_20px_rgba(255,107,0,0.35)]'
-                                  : 'ring-1 ring-[#33363f] hover:ring-zinc-400'
-                              }`}
+                              className="studio-slide-card text-left rounded overflow-hidden bg-black flex flex-col transition-all"
                             >
-                              <div className="aspect-video w-full px-3.5 py-2.5 flex flex-col items-center justify-center text-center bg-[#08090b]">
-                                <p className="text-xs font-bold text-white whitespace-pre-line line-clamp-3 leading-snug">
-                                  {cue.primaryText || '—'}
-                                </p>
-                                {cue.secondaryText && (
-                                  <p className="mt-1 text-[11px] italic text-amber-300 whitespace-pre-line line-clamp-2 leading-snug">
-                                    {cue.secondaryText}
-                                  </p>
-                                )}
-                              </div>
+                              <SongSlidePreview slide={cue} profile={audienceProfiles[0]} liveState={liveState} />
 
                               <div
                                 className={`px-2.5 py-1 ${getProPresenterBarColor(
@@ -944,16 +912,18 @@ export const OperatorStudioView: React.FC = () => {
                     ) : (
                       <div className="space-y-1.5">
                         {deckSlides.map((cue) => {
-                          const isLive =
+                          const isChosen =
                             liveState.activeSongId === selectedSong.id &&
-                            liveState.activeSlideGlobalIndex === cue.globalIndex &&
-                            !liveState.clearText
+                            liveState.activeSlideGlobalIndex === cue.globalIndex
                           return (
-                            <div
+                            <button
                               key={`${cue.id}-${cue.globalIndex}`}
+                              aria-label={`Show slide ${cue.globalIndex + 1}: ${cue.sectionLabel}`}
+                              aria-pressed={isChosen}
+                              data-selected={isChosen}
                               onClick={() => triggerSlide(selectedSong, cue.globalIndex)}
-                              className={`px-3 py-2 rounded cursor-pointer flex items-center gap-3 ${
-                                isLive
+                              className={`studio-slide-row w-full text-left px-3 py-2 rounded cursor-pointer flex items-center gap-3 ${
+                                isChosen
                                   ? 'bg-[#ff6b00]/20 border border-[#ff6b00]'
                                   : 'bg-[#232529] border border-[#2f323a] hover:bg-[#2b2e35]'
                               }`}
@@ -971,7 +941,7 @@ export const OperatorStudioView: React.FC = () => {
                               <div className="text-xs text-amber-300 italic flex-1">
                                 {cue.secondaryText.replace(/\n/g, ' / ')}
                               </div>
-                            </div>
+                            </button>
                           )
                         })}
                       </div>
@@ -983,6 +953,7 @@ export const OperatorStudioView: React.FC = () => {
                 <div className="h-7 px-3 bg-[#232529] border-t border-[#141517] flex items-center justify-between text-[11px] text-zinc-400 shrink-0">
                   <div className="flex items-center gap-1.5">
                     <button
+                      aria-label="Grid view"
                       onClick={() => setSlideViewStyle('grid')}
                       className={`p-1 rounded ${
                         slideViewStyle === 'grid' ? 'bg-[#363942] text-white' : 'hover:text-white'
@@ -991,6 +962,7 @@ export const OperatorStudioView: React.FC = () => {
                       <LayoutGrid className="w-3.5 h-3.5" />
                     </button>
                     <button
+                      aria-label="List view"
                       onClick={() => setSlideViewStyle('list')}
                       className={`p-1 rounded ${
                         slideViewStyle === 'list' ? 'bg-[#363942] text-white' : 'hover:text-white'
@@ -1018,7 +990,7 @@ export const OperatorStudioView: React.FC = () => {
 
                 {/* MEDIA BIN */}
                 {mediaBinOpen && (
-                  <section className="h-52 bg-[#1e1f23] border-t border-[#111214] flex min-h-0 shrink-0">
+                  <section className="studio-media-bin h-48 bg-[#1e1f23] border-t border-[#111214] flex min-h-0 shrink-0">
                     <div className="w-48 bg-[#232428] border-r border-[#141517] flex flex-col justify-between shrink-0">
                       <div>
                         <div className="px-3 py-1.5 bg-[#2b2d31] border-b border-[#191a1d] text-[10px] font-bold uppercase tracking-wider text-zinc-400">
@@ -1042,13 +1014,17 @@ export const OperatorStudioView: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="p-2 border-t border-[#191a1d]">
+                      <div className="p-2 border-t border-[#191a1d] space-y-1">
                         <button
                           onClick={() => importVisuals(activeMediaBin)}
                           className="w-full py-1.5 px-2.5 rounded bg-[#32353e] hover:bg-[#3e424d] text-xs font-semibold text-white flex items-center justify-center gap-1.5"
                         >
                           <FolderPlus className="w-3.5 h-3.5 text-cyan-400" />
                           + Import Media
+                        </button>
+                        <button onClick={() => setShowMediaStorage(true)}
+                          className="w-full py-1 px-2.5 rounded hover:bg-[#32353e] text-[11px] text-zinc-400 flex items-center justify-center gap-1.5">
+                          <Folder className="w-3 h-3" /> Media Folder
                         </button>
                       </div>
                     </div>
@@ -1154,9 +1130,10 @@ export const OperatorStudioView: React.FC = () => {
           {/* =================================================================
               ZONE 5: RIGHT QUADRANT (Dynamic Screen Preview + Clear Stack + Show Controls)
              ================================================================= */}
-          <aside className="w-[388px] bg-[#232428] border-l border-[#141517] flex flex-col min-h-0 shrink-0">
+          <aside className="studio-inspector w-[340px] bg-[#232428] border-l border-[#141517] flex flex-col min-h-0 shrink-0">
             {/* UPPER RIGHT: DYNAMIC PREVIEW + VERTICAL CLEAR LAYER COLUMN */}
-            <div className="p-3 bg-[#1d1e22] border-b border-[#141517] space-y-2">
+            <div className="studio-preview-panel p-2.5 bg-[#1d1e22] border-b border-[#141517] space-y-2">
+              <div className="flex items-center justify-between text-[10px] text-zinc-400 uppercase tracking-wider"><span>Preview</span><span className={activePreviewProfile?.enabled ? 'text-emerald-400' : 'text-zinc-500'}>{activePreviewProfile?.enabled ? 'Output on' : 'Output off'}</span></div>
               <div className="flex gap-2 items-stretch">
                 <div className="flex-1 flex flex-col gap-1.5 min-w-0">
                   <div className="rounded overflow-hidden border border-[#343741] bg-black shadow-lg">
@@ -1174,7 +1151,7 @@ export const OperatorStudioView: React.FC = () => {
                     <select
                       value={activePreviewProfile?.id ?? ''}
                       onChange={(e) => setPreviewProfileId(e.target.value)}
-                      className="bg-transparent text-[11px] font-semibold text-white focus:outline-none flex-1 truncate"
+                      className="bg-transparent text-[11px] font-semibold text-white focus:outline-none flex-1 min-w-0 w-0 truncate"
                     >
                       {outputProfiles.map((p) => (
                         <option key={p.id} value={p.id} className="bg-[#232529] text-white">
@@ -1192,7 +1169,7 @@ export const OperatorStudioView: React.FC = () => {
                 </div>
 
                 {/* VERTICAL CLEAR LAYER STACK */}
-                <div className="w-[62px] flex flex-col gap-1 shrink-0">
+                <div className="studio-clear-stack w-[48px] flex flex-col gap-1 shrink-0">
                   <button
                     onClick={() =>
                       updateLiveFlags({
@@ -1273,8 +1250,8 @@ export const OperatorStudioView: React.FC = () => {
             </div>
 
             {/* LOWER RIGHT: SHOW CONTROLS DRAWER + FAR-RIGHT VERTICAL ICON RAIL */}
-            <div className="flex-1 flex min-h-0">
-              <div className="flex-1 overflow-y-auto p-3.5">
+            <div className="studio-show-controls flex-1 flex min-h-0">
+              <div className="flex-1 min-w-0 overflow-y-auto p-3">
                 {activeShowControl === 'audio' && (
                   <AudioBinDrawer
                     tracks={audioTracks}
@@ -1360,11 +1337,13 @@ export const OperatorStudioView: React.FC = () => {
                       <div className="text-[11px] font-bold uppercase tracking-wider text-orange-300">
                         1. Stage Message (Back TV Only)
                       </div>
-                      <input
+                      <textarea
+                        aria-label="Stage message"
+                        rows={3}
                         value={stageMsgDraft}
                         onChange={(e) => setStageMsgDraft(e.target.value)}
                         placeholder="e.g. Wrap up chorus — Pastor ready"
-                        className="w-full px-2.5 py-1.5 rounded bg-[#18191c] border border-[#32353e] text-xs text-white"
+                        className="studio-message-input w-full px-3 py-2.5 rounded bg-[#18191c] border border-[#32353e] text-[13px] leading-relaxed text-white focus:outline-none focus:border-blue-400"
                       />
                       <div className="flex gap-2">
                         <button
@@ -1390,11 +1369,13 @@ export const OperatorStudioView: React.FC = () => {
                       <div className="text-[11px] font-bold uppercase tracking-wider text-amber-300">
                         2. Audience Notice (Top Banner)
                       </div>
-                      <input
+                      <textarea
+                        aria-label="Audience notice"
+                        rows={3}
                         value={audienceMsgDraft}
                         onChange={(e) => setAudienceMsgDraft(e.target.value)}
                         placeholder="e.g. Parent #104 needed in Kids Room"
-                        className="w-full px-2.5 py-1.5 rounded bg-[#18191c] border border-[#32353e] text-xs text-white"
+                        className="studio-message-input w-full px-3 py-2.5 rounded bg-[#18191c] border border-[#32353e] text-[13px] leading-relaxed text-white focus:outline-none focus:border-blue-400"
                       />
                       <div className="flex gap-2">
                         <button
@@ -1558,6 +1539,9 @@ export const OperatorStudioView: React.FC = () => {
           onClose={() => setShowSearchModal(false)}
         />
       )}
+
+      {showSharedLibrary && <SharedLibraryModal onClose={() => setShowSharedLibrary(false)} />}
+      {showMediaStorage && <MediaStorageModal onClose={() => setShowMediaStorage(false)} />}
 
       {showDisplayMatrix && (
         <DisplayMatrixModal

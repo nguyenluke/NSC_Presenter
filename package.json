@@ -10,7 +10,10 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "dist:win": "npm run build && electron-builder --win",
-    "dist:mac": "npm run build && electron-builder --mac"
+    "dist:win:zip": "npm run build && electron-builder --win zip",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "test:sync": "node --test tests/song-sync.test.cjs",
+    "test:pads": "node --test tests/worship-pads.test.cjs"
   },
   "dependencies": {
     "lucide-react": "^0.460.0",
@@ -18,6 +21,7 @@
     "zustand": "^5.0.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.6.0",
     "@types/node": "^22.9.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
@@ -44,8 +48,27 @@
       "out/**/*",
       "node_modules/sql.js/dist/sql-wasm.wasm"
     ],
+    "extraResources": [
+      { "from": "build/icon.ico", "to": "icon.ico" },
+      { "from": "build/icon.png", "to": "icon.png" }
+    ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.ico",
+      "artifactName": "NSC-Presenter-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "artifactName": "NSC-Presenter-Setup-${version}-${arch}.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "NSC Presenter",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
     },
     "mac": {
       "target": "dmg"

@@ -14,6 +14,10 @@ import {
 } from '@shared/types'
 import { PresenterDatabase } from './database'
 import { DisplayRouter } from './displayManager'
+import { SongLibrarySync } from './songSync'
+import { LibraryConfig } from '../shared/songSync'
+import { MediaStorage, mediaFileName } from './mediaStorage'
+import { getAppIconPath } from './appIcon'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -30,8 +34,11 @@ protocol.registerSchemesAsPrivileged([
 
 let operatorWindow: BrowserWindow | null = null
 let db: PresenterDatabase
+let songLibrary: SongLibrarySync
 let displayRouter: DisplayRouter
 let timerInterval: NodeJS.Timeout | null = null
+let mediaStorage: MediaStorage
+let choosingMediaFolder = false
 
 let liveState: LivePresentationState = {
   activeSongId: null,
@@ -56,11 +63,7 @@ let liveState: LivePresentationState = {
 }
 
 function getMediaDirectory(): string {
-  const dir = path.join(app.getPath('userData'), 'NSC_Data', 'media')
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true })
-  }
-  return dir
+  return mediaStorage.getDirectory()
 }
 
 function createOperatorWindow(): void {
@@ -69,8 +72,9 @@ function createOperatorWindow(): void {
 
   operatorWindow = new BrowserWindow({
     title: 'NSC Presenter',
-    width: 1480,
-    height: 920,
+    icon: getAppIconPath(),
+    width: 1600,
+    height: 1000,
     minWidth: 1120,
     minHeight: 700,
     frame: false,
@@ -121,6 +125,61 @@ function startLiveTimerLoop(): void {
 }
 
 function registerIpcHandlers(): void {
+  const requireOperator = (event: Electron.IpcMainInvokeEvent): void => {
+    if (!operatorWindow || event.sender !== operatorWindow.webContents ||
+        event.senderFrame !== operatorWindow.webContents.mainFrame) {
+      throw new Error('Only the operator window can manage the shared library.')
+    }
+  }
+  const libraryPayload = () => ({ songs: db.getAllSongs(), serviceItems: db.getServiceItems(), status: songLibrary.status() })
+  ipcMain.handle('nsc:media-storage-status', (event) => {
+    requireOperator(event)
+    return mediaStorage.getStatus()
+  })
+  ipcMain.handle('nsc:choose-media-folder', async (event) => {
+    requireOperator(event)
+    if (choosingMediaFolder || mediaStorage.busy) throw new Error('A media folder change is already in progress.')
+    choosingMediaFolder = true
+    try {
+      const result = await dialog.showOpenDialog(operatorWindow!, {
+        title: 'Choose a Folder for NSC Images, Videos and Audio',
+        defaultPath: getMediaDirectory(),
+        properties: ['openDirectory', 'createDirectory']
+      })
+      if (result.canceled || !result.filePaths[0]) return null
+      const names = [...db.getMediaAssets(), ...db.getAudioTracks()]
+        .map((asset) => mediaFileName(asset.url)).filter((name): name is string => name !== null)
+      return await mediaStorage.changeDirectory(result.filePaths[0], names)
+    } finally { choosingMediaFolder = false }
+  })
+  ipcMain.handle('nsc:library-status', (event) => { requireOperator(event); return songLibrary.status() })
+  ipcMain.handle('nsc:library-configure', async (event, config: LibraryConfig) => {
+    requireOperator(event)
+    await songLibrary.configure(config)
+    return songLibrary.status()
+  })
+  ipcMain.handle('nsc:library-sign-in', async (event, email: string, password: string) => {
+    requireOperator(event)
+    if (typeof email !== 'string' || typeof password !== 'string') throw new Error('Invalid sign-in details.')
+    await songLibrary.signIn(email, password)
+    return songLibrary.status()
+  })
+  ipcMain.handle('nsc:library-sign-out', async (event) => {
+    requireOperator(event)
+    await songLibrary.signOut()
+    return songLibrary.status()
+  })
+  ipcMain.handle('nsc:library-sync', async (event) => {
+    requireOperator(event)
+    const result = await songLibrary.synchronize()
+    return { ...libraryPayload(), result }
+  })
+  ipcMain.handle('nsc:library-resolve', async (event, sharedId: string, choice: 'local' | 'shared', revision: number) => {
+    requireOperator(event)
+    await songLibrary.resolve(sharedId, choice, revision)
+    return libraryPayload()
+  })
+
   ipcMain.handle('nsc:bootstrap', (): InitialBootstrapPayload => {
     const mediaAssets = db.getMediaAssets()
     if (!liveState.activeBackground && mediaAssets.length > 0) {
@@ -191,7 +250,7 @@ function registerIpcHandlers(): void {
       return db.getMediaAssets()
     }
 
-    const mediaDir = getMediaDirectory()
+    const mediaDir = mediaStorage.getImportDirectory()
     const videoExts = new Set(['.mp4', '.webm', '.mov'])
 
     for (const srcPath of result.filePaths) {
@@ -234,7 +293,7 @@ function registerIpcHandlers(): void {
       return db.getAudioTracks()
     }
 
-    const mediaDir = getMediaDirectory()
+    const mediaDir = mediaStorage.getImportDirectory()
     for (const srcPath of result.filePaths) {
       const ext = path.extname(srcPath).toLowerCase()
       const baseName = path.basename(srcPath, ext)
@@ -292,12 +351,14 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('nsc:import-backup', async (): Promise<InitialBootstrapPayload | null> => {
     if (!operatorWindow) return null
+    if (songLibrary.status().busy) throw new Error('Wait for library synchronization to finish before restoring a backup.')
     const res = await dialog.showOpenDialog(operatorWindow, {
       title: 'Import NSC Presenter Library Backup',
       properties: ['openFile'],
       filters: [{ name: 'NSC Presenter SQLite Library', extensions: ['sqlite', 'db'] }]
     })
     if (res.canceled || res.filePaths.length === 0) return null
+    if (songLibrary.status().busy) throw new Error('Wait for library synchronization to finish before restoring a backup.')
     fs.copyFileSync(res.filePaths[0], db.getDatabaseFilePath())
     db.loadFromDisk()
     displayRouter.syncOutputWindows(db.getOutputProfiles(), liveState, operatorWindow)
@@ -326,6 +387,8 @@ function registerIpcHandlers(): void {
 }
 
 app.whenReady().then(async () => {
+  if (process.platform === 'win32') app.setAppUserModelId('org.nscchurch.presenter')
+  mediaStorage = new MediaStorage(path.join(app.getPath('userData'), 'NSC_Data'))
   protocol.handle('nsc-media', (request) => {
     const parsed = new URL(request.url)
     const fileName = decodeURIComponent(parsed.pathname.replace(/^\//, ''))
@@ -337,6 +400,7 @@ app.whenReady().then(async () => {
 
   db = new PresenterDatabase()
   await db.init()
+  songLibrary = new SongLibrarySync(db)
 
   const preloadPath = path.join(__dirname, '../preload/index.js')
   displayRouter = new DisplayRouter(

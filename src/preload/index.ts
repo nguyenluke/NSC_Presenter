@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import { LibraryConfig, SongSyncStatus, SongSyncResult } from '../shared/songSync'
 import {
   AudioCategory,
   AudioTrack,
@@ -7,13 +8,26 @@ import {
   LivePresentationState,
   MediaAsset,
   MediaBin,
+  MediaStorageStatus,
   OutputProfile,
   ServiceItem,
   Song,
   SongInput
 } from '@shared/types'
 
+interface LibraryPayload { songs: Song[]; serviceItems: ServiceItem[]; status: SongSyncStatus }
+
 const nscApi = {
+  mediaStorageStatus: (): Promise<MediaStorageStatus> => ipcRenderer.invoke('nsc:media-storage-status'),
+  chooseMediaFolder: (): Promise<(MediaStorageStatus & { copied: number }) | null> => ipcRenderer.invoke('nsc:choose-media-folder'),
+  libraryStatus: (): Promise<SongSyncStatus> => ipcRenderer.invoke('nsc:library-status'),
+  configureLibrary: (config: LibraryConfig): Promise<SongSyncStatus> => ipcRenderer.invoke('nsc:library-configure', config),
+  librarySignIn: (email: string, password: string): Promise<SongSyncStatus> => ipcRenderer.invoke('nsc:library-sign-in', email, password),
+  librarySignOut: (): Promise<SongSyncStatus> => ipcRenderer.invoke('nsc:library-sign-out'),
+  syncLibrary: (): Promise<LibraryPayload & { result: SongSyncResult }> => ipcRenderer.invoke('nsc:library-sync'),
+  resolveLibraryConflict: (sharedId: string, choice: 'local' | 'shared', revision: number): Promise<LibraryPayload> =>
+    ipcRenderer.invoke('nsc:library-resolve', sharedId, choice, revision),
+
   bootstrap: (): Promise<InitialBootstrapPayload> => ipcRenderer.invoke('nsc:bootstrap'),
 
   updateLiveState: (partial: Partial<LivePresentationState>): Promise<LivePresentationState> =>
