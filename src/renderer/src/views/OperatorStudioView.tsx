@@ -47,10 +47,12 @@ import { SongSlidePreview } from '../components/studio/SongSlidePreview'
 import { PresentationTheme } from '../components/studio/presentationThemes'
 import { SharedLibraryModal } from '../components/studio/SharedLibraryModal'
 import { MediaStorageModal } from '../components/studio/MediaStorageModal'
+import { KeyboardShortcutsModal } from '../components/studio/KeyboardShortcutsModal'
+import { DEFAULT_SHORTCUTS, SHORTCUT_ACTIONS, ShortcutBindings, findShortcutAction, shortcutLabel } from '@shared/keyboardShortcuts'
 import { QuickSearchModal } from '../components/studio/QuickSearchModal'
 import { ReflowEditorView } from '../components/studio/ReflowEditorView'
 import { getProPresenterBarColor, SongEditorView } from '../components/studio/SongEditorView'
-import { flattenSongSlides, useStudioStore } from '../store/useStudioStore'
+import { flattenSongSlides, songSectionEntries, useStudioStore } from '../store/useStudioStore'
 
 const MEDIA_BINS: MediaBin[] = ['Worship Designs', 'Motion Loops', 'Sermon & Events', 'Logos']
 
@@ -119,6 +121,12 @@ export const OperatorStudioView: React.FC = () => {
   const [editingSong, setEditingSong] = useState<Song | null>(null)
   const [showSharedLibrary, setShowSharedLibrary] = useState(false)
   const [showMediaStorage, setShowMediaStorage] = useState(false)
+  const [showShortcutEditor, setShowShortcutEditor] = useState(false)
+  const [shortcutBindings, setShortcutBindings] = useState<ShortcutBindings>(() => structuredClone(DEFAULT_SHORTCUTS))
+  const [shortcutError, setShortcutError] = useState('')
+  useEffect(() => {
+    void window.nscApi.getShortcuts().then(setShortcutBindings).catch(err => setShortcutError(`Could not load shortcuts; defaults are active. ${err.message}`))
+  }, [])
   const [showSearchModal, setShowSearchModal] = useState(false)
   const toolbarPopoverRef = useRef<HTMLDivElement>(null)
   const [showTextPopover, setShowTextPopover] = useState(false)
@@ -160,7 +168,7 @@ export const OperatorStudioView: React.FC = () => {
   // Global Booth Keyboard Shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (showSharedLibrary || showMediaStorage) return
+      if (showSharedLibrary || showMediaStorage || showShortcutEditor) return
       if (showTextPopover || showThemePopover) {
         if (e.key === 'Escape') {
           e.preventDefault()
@@ -169,47 +177,31 @@ export const OperatorStudioView: React.FC = () => {
         }
         return
       }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
-        e.preventDefault()
-        setShowSearchModal(true)
-        return
-      }
-
       const target = e.target as HTMLElement | null
       if (
-        (centerMode !== 'show' && centerMode !== 'bible') ||
+        e.repeat || e.isComposing || e.getModifierState('AltGraph') ||
         showDisplayMatrix ||
         showSearchModal ||
         (target &&
           (target.tagName === 'INPUT' ||
             target.tagName === 'TEXTAREA' ||
-            target.tagName === 'SELECT'))
+            target.tagName === 'SELECT' || target.isContentEditable || target.closest('[role="dialog"]')))
       ) {
         return
       }
 
-      if (e.code === 'Space' || e.code === 'ArrowRight' || e.code === 'ArrowDown') {
-        e.preventDefault()
-        stepSlide(1)
-      } else if (e.code === 'ArrowLeft' || e.code === 'ArrowUp') {
-        e.preventDefault()
-        stepSlide(-1)
-      } else if (e.code === 'F1' || e.code === 'Escape') {
-        e.preventDefault()
-        updateLiveFlags({ clearText: true, foregroundMedia: null })
-      } else if (e.code === 'F2') {
-        e.preventDefault()
-        updateLiveFlags({ clearBackground: true, foregroundMedia: null })
-      } else if (e.code === 'F3') {
-        e.preventDefault()
-        updateLiveFlags({ showLogo: !liveState.showLogo, blackout: false })
-      } else if (e.code === 'F4') {
-        e.preventDefault()
-        updateLiveFlags({ blackout: !liveState.blackout })
-      } else if (/^Digit[1-9]$/.test(e.code)) {
-        e.preventDefault()
-        jumpToSectionNumber(Number(e.code.replace('Digit', '')))
-      }
+      const action = findShortcutAction(shortcutBindings, e)
+      if (!action) return
+      if (action === 'search') { e.preventDefault(); setShowSearchModal(true); return }
+      if (centerMode !== 'show' && centerMode !== 'bible') return
+      e.preventDefault()
+      if (action === 'next') void stepSlide(1)
+      else if (action === 'previous') void stepSlide(-1)
+      else if (action === 'clearText') void updateLiveFlags({ clearText: true, foregroundMedia: null })
+      else if (action === 'clearMedia') void updateLiveFlags({ clearBackground: true, foregroundMedia: null })
+      else if (action === 'logo') void updateLiveFlags({ showLogo: !liveState.showLogo, blackout: false })
+      else if (action === 'blackout') void updateLiveFlags({ blackout: !liveState.blackout })
+      else if (action.startsWith('section')) void jumpToSectionNumber(Number(action.slice(7)))
     }
 
     window.addEventListener('keydown', onKeyDown)
@@ -219,6 +211,8 @@ export const OperatorStudioView: React.FC = () => {
     showDisplayMatrix,
     showSharedLibrary,
     showMediaStorage,
+    showShortcutEditor,
+    shortcutBindings,
     showTextPopover,
     showThemePopover,
     showSearchModal,
@@ -327,7 +321,7 @@ export const OperatorStudioView: React.FC = () => {
           <button
             onClick={() => setShowSearchModal(true)}
             className="px-3 py-1 rounded hover:bg-[#383a40] flex flex-col items-center gap-0.5 text-zinc-200"
-            title="Search Songs & Lyrics (Cmd+F)"
+            title={`Search Songs & Lyrics${shortcutBindings.search.length ? ` (${shortcutBindings.search.map(shortcutLabel).join(' / ')})` : ''}`}
           >
             <Search className="w-4 h-4" />
             <span className="text-[10px] font-medium text-zinc-300">Search</span>
@@ -379,7 +373,7 @@ export const OperatorStudioView: React.FC = () => {
           </button>
 
           {showTextPopover && (
-            <TextFormattingPopover profiles={audienceProfiles} onChange={updateAudienceFormatting}
+            <TextFormattingPopover profiles={audienceProfiles} liveState={liveState} onChange={updateAudienceFormatting}
               onClose={() => setShowTextPopover(false)} />
           )}
           {showThemePopover && (
@@ -832,21 +826,17 @@ export const OperatorStudioView: React.FC = () => {
                       </div>
 
                       <div className="flex items-center gap-1 flex-wrap">
-                        {(selectedSong.arrangement.length > 0
-                          ? selectedSong.arrangement
-                          : selectedSong.sections.map((s) => s.id)
-                        ).map((secId, arrIdx) => {
-                          const sec = selectedSong.sections.find((s) => s.id === secId)
-                          if (!sec) return null
+                        {songSectionEntries(selectedSong).map(({ section: sec, orderIndex: arrIdx }) => {
                           return (
                             <button
-                              key={`${secId}-${arrIdx}`}
+                              key={`${sec.id}-${arrIdx}`}
+                              title={`Section ${arrIdx + 1}: ${sec.label}${arrIdx < 9 ? ` · ${shortcutBindings[`section${arrIdx + 1}`].map(shortcutLabel).join(' / ') || 'No key assigned'}` : ' · Click to cue'}`}
                               onClick={() => jumpToSectionNumber(arrIdx + 1)}
                               className={`px-2 py-0.5 rounded-sm text-[10px] font-bold text-white ${getProPresenterBarColor(
                                 sec.type
                               )}`}
                             >
-                              {sec.label}
+                              <kbd className="mr-1.5 rounded bg-black/20 px-1 text-[9px]">{arrIdx < 9 ? (shortcutBindings[`section${arrIdx + 1}`]?.[0] ? shortcutLabel(shortcutBindings[`section${arrIdx + 1}`][0]) : '—') : `${arrIdx + 1}.`}</kbd>{sec.label}
                             </button>
                           )
                         })}
@@ -971,7 +961,7 @@ export const OperatorStudioView: React.FC = () => {
                       <List className="w-3.5 h-3.5" />
                     </button>
                     <span className="ml-2 text-zinc-500">
-                      Space / Arrows = Next/Prev Slide • Keys 1–9 = Jump Section
+                      Section keys follow arrangement left → right • Customize in Keys
                     </span>
                   </div>
 
@@ -1470,23 +1460,17 @@ export const OperatorStudioView: React.FC = () => {
                     <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-2">
                       Keyboard Shortcuts
                     </div>
-                    {[
-                      ['Cmd/Ctrl + F', 'Search Songs'],
-                      ['Space / →', 'Next Slide'],
-                      ['←', 'Previous Slide'],
-                      ['1 – 9', 'Jump to Song Section'],
-                      ['Esc / F1', 'Clear Slide Lyrics'],
-                      ['F2', 'Clear Background Media'],
-                      ['F3', 'Toggle Church Logo'],
-                      ['F4', 'Blackout Screens']
-                    ].map(([key, action]) => (
+                    <p className="text-[11px] text-zinc-400">Section keys follow the selected song’s arrangement from left to right. Repeated choruses have separate positions.</p>
+                    <button onClick={() => setShowShortcutEditor(true)} className="rounded bg-[#32353e] px-3 py-2 text-xs text-cyan-300">Customize shortcuts</button>
+                    {shortcutError && <p role="alert" className="text-xs text-red-300">{shortcutError}</p>}
+                    {SHORTCUT_ACTIONS.map(([id, action]) => (
                       <div
-                        key={key}
+                        key={id}
                         className="px-2.5 py-1.5 rounded bg-[#18191c] flex items-center justify-between"
                       >
                         <span className="text-zinc-300">{action}</span>
                         <kbd className="px-1.5 py-0.5 rounded bg-[#2b2e36] font-mono text-[10px] text-orange-300">
-                          {key}
+                          {shortcutBindings[id]?.map(shortcutLabel).join(' / ') || 'Unassigned'}
                         </kbd>
                       </div>
                     ))}
@@ -1543,6 +1527,8 @@ export const OperatorStudioView: React.FC = () => {
 
       {showSharedLibrary && <SharedLibraryModal onClose={() => setShowSharedLibrary(false)} />}
       {showMediaStorage && <MediaStorageModal onClose={() => setShowMediaStorage(false)} />}
+      {showShortcutEditor && <KeyboardShortcutsModal bindings={shortcutBindings} onClose={() => setShowShortcutEditor(false)}
+        onSave={async (bindings) => { setShortcutBindings(await window.nscApi.saveShortcuts(bindings)); setShortcutError('') }} />}
 
       {showDisplayMatrix && (
         <DisplayMatrixModal

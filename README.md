@@ -48,6 +48,18 @@ For installation, transferring songs/media, and setting up the church screens, f
 - `src/renderer/src/components/outputs/` — 1920×1080 4-Layer Audience Compositor (`AudienceCanvas.tsx`), Back Stage Confidence Monitor (`StageMonitorCanvas.tsx`), and WYSIWYG Scaler (`ScaledMonitorFrame.tsx`).
 - `src/renderer/src/views/OperatorStudioView.tsx` — Dark Studio Operator Booth Control Center.
 
+## Section shortcuts and custom text positions
+
+Section shortcut badges follow the selected song's arrangement from left to right, including repeated sections. For `Intro → Verse → Chorus → Verse → Chorus`, the default keys are `1 → 2 → 3 → 4 → 5`. They cue the first slide of that section occurrence, so these keys differ from the individual slide card numbers. Additional section occurrences can still be clicked or reached with slide navigation. Number-row and numpad keys work for default section bindings.
+
+Open **Keys → Customize shortcuts** to add/remove key combinations, then **Save shortcuts**. Duplicates and common reserved combinations are rejected. **Restore defaults** fills the editor with the standard bindings; Save keeps them. Typing, editing, and dialogs pause presentation shortcuts. Output-window **Esc** remains an emergency exit regardless of customized operator bindings. Keyboard settings are saved in `NSC_Data/keyboard-shortcuts.json` on this PC, outside the song sync and database backup.
+
+Open **Text**, choose an audience screen (or all screens), then **Customize text position**. Drag the preview or use horizontal/vertical position, box width, alignment, and language spacing controls. **Apply layout** sends the draft to the chosen screen(s) and saves it in the local screen profile. Preview edits alone do not change live output. Custom layouts stay inside the canvas and below audience notices; narrow the text box to move it farther left or right. Check your longest lyrics in preview and adjust sizes/width as needed.
+
+**Top**, **Center**, and **Bottom** remain immediate presets. A Theme also returns to its preset position. Previous custom settings are retained for later adjustments. Each audience screen may have a different layout; Stage retains its separate confidence-monitor layout. Custom screen settings travel in the SQLite backup but are not shared through song sync.
+
+Run `npm run test:studio` for shortcut, persistence, section-order, actual rendering, and operator UI checks in isolated test data.
+
 ## Choose where imported media is stored
 
 In the Media Bin, click **Media Folder** below **+ Import Media**, then **Choose Media Folder**. Choose a dedicated folder on your preferred drive. The app copies existing library images, videos, and audio into it, remembers it on this PC, and uses it for future imports. Original files stay intact. A conflicting filename stops the change instead of overwriting anything.

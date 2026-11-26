@@ -1,6 +1,6 @@
 {
   "name": "nsc-presenter",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "NSC Presenter — Bilingual Multi-Screen Worship & Live Visual Studio",
   "main": "./out/main/index.js",
   "author": "NSC Worship Team",
@@ -13,7 +13,8 @@
     "dist:win:zip": "npm run build && electron-builder --win zip",
     "dist:mac": "npm run build && electron-builder --mac",
     "test:sync": "node --test tests/song-sync.test.cjs",
-    "test:pads": "node --test tests/worship-pads.test.cjs"
+    "test:pads": "node --test tests/worship-pads.test.cjs",
+    "test:studio": "npm run build && node --test tests/studio-settings.test.cjs tests/studio-layout-render.test.cjs tests/temporary-song-edits.test.cjs"
   },
   "dependencies": {
     "lucide-react": "^0.460.0",

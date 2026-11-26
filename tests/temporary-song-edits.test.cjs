@@ -14,6 +14,22 @@ require.extensions['.ts'] = (module, filename) => {
 const { PresenterDatabase } = require('../src/main/database.ts')
 const { useStudioStore } = require('../src/renderer/src/store/useStudioStore.ts')
 
+test('number shortcuts cue the visible song even when a different song is live', async (t) => {
+  t.after(() => { delete global.window })
+  const makeSong = (id, title) => ({ id, titlePrimary: title, titleSecondary: '', author: '',
+    musicalKey: 'C', bpm: 72, updatedAt: '', arrangement: ['v1', 'c1'], sections: [
+      { id: 'v1', label: 'Verse', type: 'Verse', slides: [{ id: `verse-${id}`, primaryText: title, secondaryText: '' }] },
+      { id: 'c1', label: 'Chorus', type: 'Chorus', slides: [{ id: `chorus-${id}`, primaryText: title, secondaryText: '' }] }
+    ] })
+  const songs = [makeSong(1, 'Live song'), makeSong(2, 'Visible song')]
+  let liveState = { ...useStudioStore.getState().liveState, activeSongId: 1 }
+  global.window = { nscApi: { updateLiveState: async (patch) => (liveState = { ...liveState, ...patch }) } }
+  useStudioStore.setState({ songs, selectedSongId: 2, temporarySongs: {}, liveState })
+  await useStudioStore.getState().jumpToSectionNumber(2)
+  assert.equal(liveState.activeSongId, 2)
+  assert.equal(liveState.currentSlide.id, 'chorus-2')
+})
+
 test('temporary service edits never persist or enter the song sync queue', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nsc-temporary-song-'))
   t.after(() => { delete global.window; fs.rmSync(dir, { recursive: true, force: true }) })

@@ -14,6 +14,19 @@ import {
   SongInput
 } from '@shared/types'
 
+export function songSectionEntries(song: Song | undefined | null) {
+  if (!song) return []
+  let startIndex = 0
+  const result: Array<{ section: Song['sections'][number]; startIndex: number; orderIndex: number }> = []
+  for (const id of song.arrangement.length ? song.arrangement : song.sections.map(section => section.id)) {
+    const section = song.sections.find(section => section.id === id)
+    if (!section?.slides.length) continue
+    result.push({ section, startIndex, orderIndex: result.length })
+    startIndex += section.slides.length
+  }
+  return result
+}
+
 export function flattenSongSlides(song: Song | undefined | null): SlideCue[] {
   if (!song) return []
   const sectionOrder =
@@ -243,26 +256,12 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
 
   jumpToSectionNumber: async (oneBasedSectionNum) => {
     const { songs, selectedSongId, liveState, triggerSlide } = get()
-    const targetSongId = liveState.activeSongId ?? selectedSongId
+    const targetSongId = selectedSongId ?? liveState.activeSongId
     const song = get().temporarySongs[targetSongId ?? -1] ?? songs.find((s) => s.id === targetSongId)
     if (!song) return
 
     const cues = flattenSongSlides(song)
-    const distinctSectionStartIndices: number[] = []
-    const order =
-      song.arrangement && song.arrangement.length > 0
-        ? song.arrangement
-        : song.sections.map((s) => s.id)
-
-    let slideCursor = 0
-    for (let i = 0; i < order.length; i++) {
-      const sec = song.sections.find((s) => s.id === order[i])
-      if (!sec || sec.slides.length === 0) continue
-      distinctSectionStartIndices.push(slideCursor)
-      slideCursor += sec.slides.length
-    }
-
-    const targetSlideIdx = distinctSectionStartIndices[oneBasedSectionNum - 1]
+    const targetSlideIdx = songSectionEntries(song)[oneBasedSectionNum - 1]?.startIndex
     if (targetSlideIdx !== undefined && cues[targetSlideIdx]) {
       await triggerSlide(song, targetSlideIdx)
     }

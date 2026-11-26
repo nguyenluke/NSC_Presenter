@@ -1,5 +1,6 @@
 import React, { useLayoutEffect, useRef, useState } from 'react'
 import { LivePresentationState, MediaAsset, OutputProfile } from '@shared/types'
+import { customTextGeometry, normalizeTextLayout } from '@shared/textLayout'
 
 interface AudienceCanvasProps {
   liveState: LivePresentationState
@@ -49,6 +50,18 @@ function MediaLayer({ asset, staticMedia = false }: { asset: MediaAsset | null; 
 export const AudienceCanvas: React.FC<AudienceCanvasProps> = ({ liveState, profile, staticMedia = false }) => {
   const noticeRef = useRef<HTMLDivElement>(null)
   const [noticeBottom, setNoticeBottom] = useState(0)
+  const textRef = useRef<HTMLDivElement>(null)
+  const [textHeight, setTextHeight] = useState(0)
+  useLayoutEffect(() => {
+    if (profile.verticalAlign !== 'custom') return
+    const text = textRef.current
+    if (!text) return
+    const measure = (): void => setTextHeight(text.scrollHeight)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(text)
+    return () => observer.disconnect()
+  }, [liveState.currentSlide, profile])
   useLayoutEffect(() => {
     const notice = noticeRef.current
     if (!notice) { setNoticeBottom(0); return }
@@ -75,6 +88,9 @@ export const AudienceCanvas: React.FC<AudienceCanvasProps> = ({ liveState, profi
     slide &&
     Boolean(slide.secondaryText?.trim()) &&
     (profile.languageMode === 'both' || profile.languageMode === 'secondary')
+  const custom = profile.verticalAlign === 'custom'
+  const layout = normalizeTextLayout(profile.customTextLayout)
+  const geometry = customTextGeometry(layout, textHeight, noticeBottom)
 
   return (
     <div className="relative w-[1920px] h-[1080px] bg-black overflow-hidden select-none">
@@ -107,15 +123,16 @@ export const AudienceCanvas: React.FC<AudienceCanvasProps> = ({ liveState, profi
       {/* LAYER 3: Dual-Language Worship / Scripture Lyrics Compositor */}
       <div
         data-text-position={profile.verticalAlign}
-        style={{ paddingTop: profile.verticalAlign === 'top' ? Math.max(96, noticeBottom ? noticeBottom + 32 : 96) : undefined }}
-        className={`absolute inset-0 z-10 flex flex-col px-28 transition-opacity duration-200 ${
+        style={custom ? undefined : { paddingTop: profile.verticalAlign === 'top' ? Math.max(96, noticeBottom ? noticeBottom + 32 : 96) : undefined }}
+        className={`absolute inset-0 z-10 flex flex-col ${custom ? '' : 'px-28'} transition-opacity duration-200 ${
           profile.verticalAlign === 'top'
             ? 'justify-start'
             : profile.verticalAlign === 'bottom' ? 'justify-end pb-24' : 'justify-center'
         } ${showLyrics ? 'opacity-100' : 'opacity-0'}`}
       >
         {slide && (
-          <div className="w-full text-center space-y-7">
+          <div ref={textRef} className={custom ? 'absolute flex flex-col overflow-hidden' : 'w-full text-center space-y-7'}
+            style={custom ? { ...geometry, textAlign: layout.align, gap: layout.languageGap, overflowWrap: 'anywhere' } : undefined}>
             {showPrimary && (
               <p
                 className="font-bold tracking-tight whitespace-pre-line leading-[1.24]"
