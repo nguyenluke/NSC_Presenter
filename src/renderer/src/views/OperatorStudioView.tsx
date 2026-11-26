@@ -1310,9 +1310,10 @@ export const OperatorStudioView: React.FC = () => {
                     <div className="space-y-1.5">
                       <div className="text-[11px] text-zinc-400">Countdown Presets:</div>
                       <div className="grid grid-cols-4 gap-1.5">
-                        {[5, 10, 25, 45].map((m) => (
+                        {Array.from({ length: 12 }, (_, index) => (index + 1) * 5).map((m) => (
                           <button
                             key={m}
+                            aria-label={`${m} minute countdown`}
                             onClick={() =>
                               updateLiveFlags({
                                 timerSeconds: m * 60,

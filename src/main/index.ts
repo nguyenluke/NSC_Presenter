@@ -73,7 +73,7 @@ function createOperatorWindow(): void {
   operatorWindow = new BrowserWindow({
     title: 'NSC Presenter',
     icon: getAppIconPath(),
-    width: 1600,
+    width: 1700,
     height: 1000,
     minWidth: 1120,
     minHeight: 700,

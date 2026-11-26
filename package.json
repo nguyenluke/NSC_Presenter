@@ -1,6 +1,6 @@
 {
   "name": "nsc-presenter",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "NSC Presenter — Bilingual Multi-Screen Worship & Live Visual Studio",
   "main": "./out/main/index.js",
   "author": "NSC Worship Team",
