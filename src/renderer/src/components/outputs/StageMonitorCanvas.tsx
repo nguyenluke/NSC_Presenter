@@ -161,7 +161,7 @@ export const StageMonitorCanvas: React.FC<StageMonitorCanvasProps> = ({ liveStat
         </div>
 
         {liveState.stageAlert.trim() !== '' && (
-          <div className="w-full py-4 px-8 rounded-2xl bg-amber-500 text-black font-black text-4xl uppercase tracking-wide text-center shadow-lg animate-pulse">
+          <div className="w-full py-4 px-8 rounded-2xl bg-amber-500 text-black font-black text-4xl uppercase tracking-wide text-center shadow-lg animate-pulse whitespace-pre-line break-words">
             ⚠ BOOTH MESSAGE: {liveState.stageAlert}
           </div>
         )}

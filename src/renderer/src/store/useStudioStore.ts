@@ -55,6 +55,7 @@ interface StudioStore {
   activeMediaBin: MediaBin
   liveState: LivePresentationState
 
+  refreshLibrarySongs: () => Promise<void>
   bootstrap: () => Promise<void>
   dismissDisplayAlert: () => void
   selectSongForDeck: (songId: number) => void
@@ -159,6 +160,13 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
         newlyDetectedDisplayAlert: newDisplays.length > prevCount
       })
     })
+  },
+
+  refreshLibrarySongs: async () => {
+    const data = await window.nscApi.bootstrap()
+    set((state) => ({ songs: data.songs, serviceItems: data.serviceItems,
+      selectedSongId: data.songs.some((song) => song.id === state.selectedSongId)
+        ? state.selectedSongId : data.songs[0]?.id ?? null }))
   },
 
   dismissDisplayAlert: () => set({ newlyDetectedDisplayAlert: false }),

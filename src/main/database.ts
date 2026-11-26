@@ -1,5 +1,7 @@
 import fs from 'fs'
 import path from 'path'
+import { randomUUID } from 'crypto'
+import { PendingSong, SharedSong, validateSharedSong } from '../shared/songSync'
 import { app } from 'electron'
 import initSqlJs, { Database, SqlJsStatic } from 'sql.js'
 import {
@@ -18,8 +20,7 @@ export class PresenterDatabase {
   private db!: Database
   private dbFilePath: string
 
-  constructor() {
-    const dataDir = path.join(app.getPath('userData'), 'NSC_Data')
+  constructor(dataDir = path.join(app.getPath('userData'), 'NSC_Data')) {
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true })
     }
@@ -57,18 +58,39 @@ export class PresenterDatabase {
       this.db = new this.SQL.Database()
     }
 
+    if (fs.existsSync(this.dbFilePath) &&
+        !this.db.exec("SELECT name FROM sqlite_master WHERE name = 'song_sync'").length &&
+        !fs.existsSync(this.dbFilePath + '.before-sync.bak')) {
+      fs.copyFileSync(this.dbFilePath, this.dbFilePath + '.before-sync.bak')
+    }
     this.createSchema()
     this.seedDefaultsIfNeeded()
+    for (const song of this.getAllSongs()) {
+      if (!this.syncRowByLocalId(song.id)) this.markSongDirty(song.id, song)
+    }
+    this.db.run("INSERT OR IGNORE INTO sync_settings VALUES ('songs_initialized', '1')")
     this.persist()
   }
 
   private persist(): void {
     const binaryArray = this.db.export()
-    fs.writeFileSync(this.dbFilePath, Buffer.from(binaryArray))
+    const temporaryPath = this.dbFilePath + '.tmp'
+    fs.writeFileSync(temporaryPath, Buffer.from(binaryArray))
+    fs.renameSync(temporaryPath, this.dbFilePath)
   }
 
   private createSchema(): void {
     this.db.run(`
+      CREATE TABLE IF NOT EXISTS song_sync (
+        shared_id TEXT PRIMARY KEY,
+        local_id INTEGER UNIQUE,
+        revision INTEGER NOT NULL DEFAULT 0,
+        mutation_id TEXT NOT NULL,
+        dirty INTEGER NOT NULL DEFAULT 1,
+        deleted INTEGER NOT NULL DEFAULT 0,
+        payload_json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS sync_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS songs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title_primary TEXT NOT NULL,
@@ -207,7 +229,8 @@ export class PresenterDatabase {
 
     // 3. Seed Bilingual Worship Songs
     const existingSongs = this.getAllSongs()
-    if (existingSongs.length === 0) {
+    if (existingSongs.length === 0 &&
+        !this.db.exec("SELECT value FROM sync_settings WHERE key = 'songs_initialized'").length) {
       const sampleSongs: SongInput[] = [
         {
           titlePrimary: 'Đấng Mở Đường',
@@ -389,6 +412,7 @@ export class PresenterDatabase {
           input.id
         ]
       )
+      this.markSongDirty(input.id)
       if (shouldPersist) this.persist()
       return this.getAllSongs().find((s) => s.id === input.id)!
     } else {
@@ -408,14 +432,127 @@ export class PresenterDatabase {
       )
       const idRes = this.db.exec('SELECT last_insert_rowid() AS id')
       const newId = Number(idRes[0].values[0][0])
+      this.markSongDirty(newId)
       if (shouldPersist) this.persist()
       return this.getAllSongs().find((s) => s.id === newId)!
     }
   }
 
   public deleteSong(id: number): void {
+    if (!this.getAllSongs().some((song) => song.id === id)) return
+    this.markSongDirty(id)
+    this.db.run('UPDATE song_sync SET deleted = 1, local_id = NULL WHERE local_id = ?', [id])
     this.db.run('DELETE FROM songs WHERE id = ?', [id])
     this.db.run("DELETE FROM service_items WHERE item_type = 'song' AND target_id = ?", [id])
+    this.persist()
+  }
+
+  private syncRowByLocalId(id: number): Record<string, unknown> | undefined {
+    const stmt = this.db.prepare('SELECT * FROM song_sync WHERE local_id = ?')
+    try { stmt.bind([id]); return stmt.step() ? stmt.getAsObject() : undefined }
+    finally { stmt.free() }
+  }
+
+  private newSharedId(song: Song): string {
+    // Bundled examples represent the same songs across fresh installations.
+    const sampleIds: Record<string, string> = {
+      'wm-1': '9ee00290-6ef2-4df9-83aa-5d3025a50001',
+      'gog-1': '9ee00290-6ef2-4df9-83aa-5d3025a50002'
+    }
+    const candidate = sampleIds[song.sections[0]?.slides[0]?.id ?? '']
+    if (candidate) {
+      const stmt = this.db.prepare('SELECT shared_id FROM song_sync WHERE shared_id = ?')
+      try { stmt.bind([candidate]); if (!stmt.step()) return candidate }
+      finally { stmt.free() }
+    }
+    return randomUUID()
+  }
+
+  private markSongDirty(id: number, existingSong?: Song): void {
+    const song = existingSong ?? this.getAllSongs().find((entry) => entry.id === id)
+    if (!song) throw new Error('Song no longer exists.')
+    const { id: _id, updatedAt: _updatedAt, ...payload } = song
+    const existing = this.syncRowByLocalId(id)
+    this.db.run(`INSERT INTO song_sync
+      (shared_id, local_id, revision, mutation_id, dirty, deleted, payload_json)
+      VALUES (?, ?, 0, ?, 1, 0, ?)
+      ON CONFLICT(local_id) DO UPDATE SET mutation_id = excluded.mutation_id,
+        dirty = 1, payload_json = excluded.payload_json`,
+      [String(existing?.shared_id ?? this.newSharedId(song)), id, randomUUID(), JSON.stringify(payload)])
+  }
+
+  public checkSharedLibrary(identity: string): void {
+    const rows = this.db.exec("SELECT value FROM sync_settings WHERE key = 'library'")
+    if (rows.length && rows[0].values[0][0] !== identity) {
+      throw new Error('This local library is linked to another project/library ID. Restore the original connection settings.')
+    }
+  }
+
+  public bindSharedLibrary(identity: string): void {
+    this.checkSharedLibrary(identity)
+    this.db.run("INSERT OR IGNORE INTO sync_settings VALUES ('library', ?)", [identity])
+    this.persist()
+  }
+
+  public getPendingSongs(): PendingSong[] {
+    const stmt = this.db.prepare('SELECT * FROM song_sync WHERE dirty = 1 ORDER BY shared_id')
+    const pending: PendingSong[] = []
+    try {
+      while (stmt.step()) {
+        const row = stmt.getAsObject()
+        pending.push({ sharedId: String(row.shared_id), revision: Number(row.revision),
+          mutationId: String(row.mutation_id), deleted: Boolean(row.deleted),
+          payload: JSON.parse(String(row.payload_json)) })
+      }
+    } finally { stmt.free() }
+    return pending
+  }
+
+  public acknowledgeSong(sent: PendingSong, revision: number): void {
+    // Retain pending edits made while the network request was in flight.
+    this.db.run(`UPDATE song_sync SET revision = ?, dirty = CASE WHEN mutation_id = ? THEN 0 ELSE 1 END
+      WHERE shared_id = ?`, [revision, sent.mutationId, sent.sharedId])
+    this.persist()
+  }
+
+  public applySharedSong(remote: SharedSong, discardLocal = false): boolean {
+    validateSharedSong(remote)
+    const stmt = this.db.prepare('SELECT * FROM song_sync WHERE shared_id = ?')
+    let existing: Record<string, unknown> | undefined
+    try { stmt.bind([remote.id]); existing = stmt.step() ? stmt.getAsObject() : undefined }
+    finally { stmt.free() }
+    if (existing && !discardLocal && (existing.dirty || Number(existing.revision) >= remote.revision)) return false
+    this.db.run('BEGIN')
+    try {
+      const localId = existing?.local_id == null ? undefined : Number(existing.local_id)
+      let savedId: number | null = localId ?? null
+      if (remote.deleted) {
+        if (localId !== undefined) {
+          this.db.run('DELETE FROM songs WHERE id = ?', [localId])
+          this.db.run("DELETE FROM service_items WHERE item_type = 'song' AND target_id = ?", [localId])
+        }
+        savedId = null
+      } else {
+        const saved = this.saveSong({ ...remote.payload, id: localId }, false)
+        savedId = saved.id
+        this.db.run('DELETE FROM song_sync WHERE local_id = ?', [saved.id])
+      }
+      this.db.run(`INSERT INTO song_sync
+        (shared_id, local_id, revision, mutation_id, dirty, deleted, payload_json)
+        VALUES (?, ?, ?, ?, 0, ?, ?)
+        ON CONFLICT(shared_id) DO UPDATE SET local_id = excluded.local_id,
+          revision = excluded.revision, mutation_id = excluded.mutation_id, dirty = 0,
+          deleted = excluded.deleted, payload_json = excluded.payload_json`,
+        [remote.id, savedId, remote.revision, remote.mutation_id, Number(remote.deleted), JSON.stringify(remote.payload)])
+      this.db.run('COMMIT')
+    } catch (error) { this.db.run('ROLLBACK'); throw error }
+    this.persist()
+    return true
+  }
+
+  public keepLocalSong(sharedId: string, revision: number): void {
+    this.db.run('UPDATE song_sync SET revision = ?, mutation_id = ?, dirty = 1 WHERE shared_id = ?',
+      [revision, randomUUID(), sharedId])
     this.persist()
   }
 

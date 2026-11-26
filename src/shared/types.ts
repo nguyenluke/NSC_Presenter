@@ -101,7 +101,7 @@ export interface OutputProfile {
   primaryColor: string
   secondaryColor: string
   dimOpacity: number
-  verticalAlign: 'center' | 'bottom'
+  verticalAlign: 'top' | 'center' | 'bottom'
 }
 
 export interface SlideCue extends BilingualSlide {

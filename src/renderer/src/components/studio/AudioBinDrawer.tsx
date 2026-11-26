@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { FolderPlus, Music, Square, Trash2, Volume2 } from 'lucide-react'
+import { PAD_KEYS } from './padKeys'
 import { AudioCategory, AudioTrack } from '@shared/types'
 
 interface AudioBinDrawerProps {
@@ -8,19 +9,9 @@ interface AudioBinDrawerProps {
   onDeleteAudio: (id: number) => Promise<void>
 }
 
-const PAD_KEYS: { key: string; freq: number }[] = [
-  { key: 'C', freq: 130.81 },
-  { key: 'D', freq: 146.83 },
-  { key: 'E', freq: 164.81 },
-  { key: 'F', freq: 174.61 },
-  { key: 'G', freq: 196.0 },
-  { key: 'A', freq: 220.0 },
-  { key: 'B', freq: 246.94 }
-]
-
 /**
  * ProPresenter 7 "Audio Bin" + Built-In Worship Leader Ambient Prayer Pads!
- * 1. Built-in warm worship synth pad in Keys C..B with smooth 2.2s worship fade-in / fade-out!
+ * 1. Built-in warm worship synth pad in all 12 chromatic keys with smooth 2.2s worship fade-in / fade-out!
  * 2. Import `.mp3` / `.wav` / `.m4a` walk-in music or backing pads with smooth fade-out!
  */
 export const AudioBinDrawer: React.FC<AudioBinDrawerProps> = ({
@@ -28,6 +19,7 @@ export const AudioBinDrawer: React.FC<AudioBinDrawerProps> = ({
   onImportAudio,
   onDeleteAudio
 }) => {
+  const [audioError, setAudioError] = useState('')
   const [activePadKey, setActivePadKey] = useState<string | null>(null)
   const [playingTrackId, setPlayingTrackId] = useState<number | null>(null)
   const [volume, setVolume] = useState(0.55)
@@ -71,6 +63,10 @@ export const AudioBinDrawer: React.FC<AudioBinDrawerProps> = ({
 
     const ctx = audioCtxRef.current || new AudioContext()
     audioCtxRef.current = ctx
+    setAudioError('')
+    if (ctx.state === 'suspended') {
+      void ctx.resume().catch(() => setAudioError('Audio could not start. Check your audio output and try again.'))
+    }
 
     const masterGain = ctx.createGain()
     masterGain.gain.setValueAtTime(0.0001, ctx.currentTime)
@@ -167,7 +163,7 @@ export const AudioBinDrawer: React.FC<AudioBinDrawerProps> = ({
         </div>
       </div>
 
-      {/* 1. Built-in Instant Worship Prayer Pads (Keys C–B) */}
+      {/* 1. Built-in Instant Worship Prayer Pads (all 12 chromatic keys) */}
       <div className="p-3 rounded-lg bg-[#18191c] border border-[#32353e] space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold text-zinc-200">
@@ -183,27 +179,34 @@ export const AudioBinDrawer: React.FC<AudioBinDrawerProps> = ({
           )}
         </div>
         <p className="text-[10px] text-zinc-400">
-          Smooth synth pad for prayer, transitions, or speaking (fades in/out gently):
+          Smooth synth pad for prayer, transitions, or speaking (fades in/out gently). Sharps and flats share the same pitch:
         </p>
-        <div className="grid grid-cols-7 gap-1">
-          {PAD_KEYS.map(({ key, freq }) => {
+        <div role="group" aria-label="Prayer pad keys" className="grid grid-cols-4 gap-1.5">
+          {PAD_KEYS.map(({ key, label, freq }) => {
             const isPlaying = activePadKey === key
             return (
               <button
                 key={key}
+                aria-label={`${isPlaying ? 'Fade out' : 'Play'} ${label} pad`}
+                aria-pressed={isPlaying}
+                data-pad-key={key}
+                title={`${label} · ${freq.toFixed(2)} Hz`}
                 onClick={() => togglePadKey(key, freq)}
-                className={`py-2 rounded font-mono text-xs font-bold transition ${
+                className={`min-h-[44px] px-1 py-1.5 rounded font-mono text-xs font-bold flex flex-col items-center justify-center leading-tight transition ${
                   isPlaying
                     ? 'bg-[#ff6b00] text-white shadow-[0_0_10px_rgba(255,107,0,0.5)]'
                     : 'bg-[#262930] hover:bg-[#323640] text-zinc-200'
                 }`}
               >
-                {key}
+                <span>{label.split(' / ')[0]}</span>
+                {label.includes(' / ') && <span className="text-[9px] font-medium opacity-75 mt-0.5">{label.split(' / ')[1]}</span>}
               </button>
             )
           })}
         </div>
       </div>
+
+      {audioError && <p role="alert" className="text-xs text-red-300">{audioError}</p>}
 
       {/* 2. Imported MP3 / WAV Pre-Service & Worship Tracks */}
       <div className="space-y-2">

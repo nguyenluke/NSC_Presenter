@@ -7,12 +7,14 @@ interface ScaledMonitorFrameProps {
   liveState: LivePresentationState
   profile: OutputProfile
   className?: string
+  staticMedia?: boolean
 }
 
 export const ScaledMonitorFrame: React.FC<ScaledMonitorFrameProps> = ({
   liveState,
   profile,
-  className = ''
+  className = '',
+  staticMedia = false
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [scale, setScale] = useState(0.2)
@@ -53,7 +55,7 @@ export const ScaledMonitorFrame: React.FC<ScaledMonitorFrameProps> = ({
         {profile.screenType === 'stage' ? (
           <StageMonitorCanvas liveState={liveState} profile={profile} />
         ) : (
-          <AudienceCanvas liveState={liveState} profile={profile} />
+          <AudienceCanvas liveState={liveState} profile={profile} staticMedia={staticMedia} />
         )}
       </div>
     </div>

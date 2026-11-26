@@ -464,11 +464,12 @@ export const DisplayMatrixModal: React.FC<DisplayMatrixModalProps> = ({
                           onChange={(e) =>
                             onUpdateProfile({
                               ...selectedProfile,
-                              verticalAlign: e.target.value as 'center' | 'bottom'
+                              verticalAlign: e.target.value as OutputProfile['verticalAlign']
                             })
                           }
                           className="w-full px-3 py-2 rounded-lg bg-[#121316] border border-[#3a3d46] text-xs text-white"
                         >
+                          <option value="top">Top (Upper Screen)</option>
                           <option value="center">Centered (Standard LED / Projector)</option>
                           <option value="bottom">Lower-Third Bottom (Livestream / Side TV)</option>
                         </select>

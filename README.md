@@ -45,3 +45,11 @@ npm run dev
 - `src/preload/index.ts` — Secure `window.nscApi` bridge between Main and React windows.
 - `src/renderer/src/components/outputs/` — 1920×1080 4-Layer Audience Compositor (`AudienceCanvas.tsx`), Back Stage Confidence Monitor (`StageMonitorCanvas.tsx`), and WYSIWYG Scaler (`ScaledMonitorFrame.tsx`).
 - `src/renderer/src/views/OperatorStudioView.tsx` — Dark Studio Operator Booth Control Center.
+
+## Shared songs with Supabase PostgreSQL
+
+The cloud icon beside **Worship Songs** opens the shared-library panel. It supports manual song sync, offline edits, safe retries, and conflict choices. SQLite still serves presentation locally; media and playlists remain on this PC.
+
+Follow [the setup guide](docs/SHARED_LIBRARY.md) to create a free Supabase project, run the SQL migration, create a member account, and connect both PCs. Never put database passwords or service-role keys into the app.
+
+Run `npm run test:sync` for PostgreSQL/RLS and offline-sync integration tests, then `npm run typecheck` and `npm run build`.

@@ -14,6 +14,8 @@ import {
 } from '@shared/types'
 import { PresenterDatabase } from './database'
 import { DisplayRouter } from './displayManager'
+import { SongLibrarySync } from './songSync'
+import { LibraryConfig } from '../shared/songSync'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -30,6 +32,7 @@ protocol.registerSchemesAsPrivileged([
 
 let operatorWindow: BrowserWindow | null = null
 let db: PresenterDatabase
+let songLibrary: SongLibrarySync
 let displayRouter: DisplayRouter
 let timerInterval: NodeJS.Timeout | null = null
 
@@ -69,8 +72,8 @@ function createOperatorWindow(): void {
 
   operatorWindow = new BrowserWindow({
     title: 'NSC Presenter',
-    width: 1480,
-    height: 920,
+    width: 1600,
+    height: 1000,
     minWidth: 1120,
     minHeight: 700,
     frame: false,
@@ -121,6 +124,41 @@ function startLiveTimerLoop(): void {
 }
 
 function registerIpcHandlers(): void {
+  const requireOperator = (event: Electron.IpcMainInvokeEvent): void => {
+    if (!operatorWindow || event.sender !== operatorWindow.webContents ||
+        event.senderFrame !== operatorWindow.webContents.mainFrame) {
+      throw new Error('Only the operator window can manage the shared library.')
+    }
+  }
+  const libraryPayload = () => ({ songs: db.getAllSongs(), serviceItems: db.getServiceItems(), status: songLibrary.status() })
+  ipcMain.handle('nsc:library-status', (event) => { requireOperator(event); return songLibrary.status() })
+  ipcMain.handle('nsc:library-configure', async (event, config: LibraryConfig) => {
+    requireOperator(event)
+    await songLibrary.configure(config)
+    return songLibrary.status()
+  })
+  ipcMain.handle('nsc:library-sign-in', async (event, email: string, password: string) => {
+    requireOperator(event)
+    if (typeof email !== 'string' || typeof password !== 'string') throw new Error('Invalid sign-in details.')
+    await songLibrary.signIn(email, password)
+    return songLibrary.status()
+  })
+  ipcMain.handle('nsc:library-sign-out', async (event) => {
+    requireOperator(event)
+    await songLibrary.signOut()
+    return songLibrary.status()
+  })
+  ipcMain.handle('nsc:library-sync', async (event) => {
+    requireOperator(event)
+    const result = await songLibrary.synchronize()
+    return { ...libraryPayload(), result }
+  })
+  ipcMain.handle('nsc:library-resolve', async (event, sharedId: string, choice: 'local' | 'shared', revision: number) => {
+    requireOperator(event)
+    await songLibrary.resolve(sharedId, choice, revision)
+    return libraryPayload()
+  })
+
   ipcMain.handle('nsc:bootstrap', (): InitialBootstrapPayload => {
     const mediaAssets = db.getMediaAssets()
     if (!liveState.activeBackground && mediaAssets.length > 0) {
@@ -292,12 +330,14 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('nsc:import-backup', async (): Promise<InitialBootstrapPayload | null> => {
     if (!operatorWindow) return null
+    if (songLibrary.status().busy) throw new Error('Wait for library synchronization to finish before restoring a backup.')
     const res = await dialog.showOpenDialog(operatorWindow, {
       title: 'Import NSC Presenter Library Backup',
       properties: ['openFile'],
       filters: [{ name: 'NSC Presenter SQLite Library', extensions: ['sqlite', 'db'] }]
     })
     if (res.canceled || res.filePaths.length === 0) return null
+    if (songLibrary.status().busy) throw new Error('Wait for library synchronization to finish before restoring a backup.')
     fs.copyFileSync(res.filePaths[0], db.getDatabaseFilePath())
     db.loadFromDisk()
     displayRouter.syncOutputWindows(db.getOutputProfiles(), liveState, operatorWindow)
@@ -337,6 +377,7 @@ app.whenReady().then(async () => {
 
   db = new PresenterDatabase()
   await db.init()
+  songLibrary = new SongLibrarySync(db)
 
   const preloadPath = path.join(__dirname, '../preload/index.js')
   displayRouter = new DisplayRouter(

@@ -1,9 +1,12 @@
 import React, { useState } from 'react'
 import { Check, Plus, Sparkles, Trash2 } from 'lucide-react'
-import { BilingualSlide, SectionType, Song, SongInput, SongSection } from '@shared/types'
+import { SongSlidePreview } from './SongSlidePreview'
+import { BilingualSlide, LivePresentationState, OutputProfile, SectionType, Song, SongInput, SongSection } from '@shared/types'
 
 interface SongEditorViewProps {
   initialSong?: Song | null
+  previewProfile?: OutputProfile
+  liveState: LivePresentationState
   onCancel: () => void
   onSave: (input: SongInput) => Promise<void>
 }
@@ -44,6 +47,8 @@ function uid(prefix: string): string {
  */
 export const SongEditorView: React.FC<SongEditorViewProps> = ({
   initialSong,
+  previewProfile,
+  liveState,
   onCancel,
   onSave
 }) => {
@@ -369,16 +374,7 @@ export const SongEditorView: React.FC<SongEditorViewProps> = ({
                             : 'border-[#32353e] hover:border-zinc-500'
                         }`}
                       >
-                        <div className="aspect-[16/8] bg-black px-3 py-2 flex flex-col items-center justify-center text-center">
-                          <p className="text-[11px] font-semibold text-white line-clamp-2">
-                            {sl.primaryText || 'Empty slide — click to type'}
-                          </p>
-                          {sl.secondaryText && (
-                            <p className="text-[10px] italic text-amber-300 line-clamp-1 mt-0.5">
-                              {sl.secondaryText}
-                            </p>
-                          )}
-                        </div>
+                        <SongSlidePreview slide={sl} profile={previewProfile} liveState={liveState} />
                         <div
                           className={`px-2.5 py-1 ${getProPresenterBarColor(
                             sec.type
@@ -445,31 +441,10 @@ export const SongEditorView: React.FC<SongEditorViewProps> = ({
           {/* Live 16:9 Slide Preview Card */}
           {activeSection && activeSlide && (
             <div className="max-w-3xl mx-auto space-y-5">
-              <div className="aspect-video w-full rounded-xl bg-black border-2 border-[#383b46] shadow-2xl flex flex-col items-center justify-center px-12 text-center relative overflow-hidden">
-                <div
-                  className="absolute inset-0 opacity-60"
-                  style={{
-                    background:
-                      'radial-gradient(circle at 50% 30%, #1e3a8a 0%, #090d16 70%)'
-                  }}
-                />
-                <div className="relative z-10 space-y-3">
-                  <p className="text-2xl md:text-3xl font-bold text-white whitespace-pre-line leading-snug drop-shadow">
-                    {activeSlide.primaryText || 'Type Language 1 lyrics below...'}
-                  </p>
-                  {activeSlide.secondaryText && (
-                    <p className="text-lg md:text-xl italic text-amber-300 whitespace-pre-line leading-snug drop-shadow">
-                      {activeSlide.secondaryText}
-                    </p>
-                  )}
-                </div>
-                <div
-                  className={`absolute bottom-0 inset-x-0 px-4 py-1.5 ${getProPresenterBarColor(
-                    activeSection.type
-                  )} text-xs font-bold text-white flex items-center justify-between`}
-                >
-                  <span>{activeSection.label}</span>
-                  <span>Live Slide Preview</span>
+              <div className="w-full rounded border border-[#383b46] overflow-hidden bg-black">
+                <SongSlidePreview slide={{ ...activeSlide, primaryText: activeSlide.primaryText || 'Type Language 1 lyrics below…' }} profile={previewProfile} liveState={liveState} />
+                <div className={`px-4 py-1.5 ${getProPresenterBarColor(activeSection.type)} text-xs font-semibold text-white flex justify-between`}>
+                  <span>{activeSection.label}</span><span>Slide Preview</span>
                 </div>
               </div>
 

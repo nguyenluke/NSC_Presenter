@@ -1,10 +1,13 @@
 import React, { useState } from 'react'
 import { Check, Plus, SplitSquareVertical, Trash2 } from 'lucide-react'
-import { SectionType, Song, SongInput, SongSection } from '@shared/types'
+import { SongSlidePreview } from './SongSlidePreview'
+import { LivePresentationState, OutputProfile, SectionType, Song, SongInput, SongSection } from '@shared/types'
 import { getProPresenterBarColor } from './SongEditorView'
 
 interface ReflowEditorViewProps {
   song: Song | null
+  previewProfile?: OutputProfile
+  liveState: LivePresentationState
   onSave: (input: SongInput) => Promise<void>
   onSwitchToShow: () => void
 }
@@ -20,6 +23,8 @@ function uid(prefix: string): string {
  */
 export const ReflowEditorView: React.FC<ReflowEditorViewProps> = ({
   song,
+  previewProfile,
+  liveState,
   onSave,
   onSwitchToShow
 }) => {
@@ -241,16 +246,7 @@ export const ReflowEditorView: React.FC<ReflowEditorViewProps> = ({
                   key={sl.id}
                   className="rounded-md overflow-hidden ring-1 ring-[#32353e] bg-black flex flex-col"
                 >
-                  <div className="aspect-video p-3 flex flex-col items-center justify-center text-center">
-                    <p className="text-xs font-bold text-white whitespace-pre-line line-clamp-3">
-                      {sl.primaryText || '—'}
-                    </p>
-                    {sl.secondaryText && (
-                      <p className="text-[10px] italic text-amber-300 mt-1 whitespace-pre-line line-clamp-2">
-                        {sl.secondaryText}
-                      </p>
-                    )}
-                  </div>
+                  <SongSlidePreview slide={sl} profile={previewProfile} liveState={liveState} />
                   <div
                     className={`px-2.5 py-1 ${getProPresenterBarColor(
                       sec.type
