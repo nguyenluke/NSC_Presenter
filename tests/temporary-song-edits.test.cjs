@@ -14,6 +14,23 @@ require.extensions['.ts'] = (module, filename) => {
 const { PresenterDatabase } = require('../src/main/database.ts')
 const { useStudioStore } = require('../src/renderer/src/store/useStudioStore.ts')
 
+test('sermon next/previous uses document order and returning to songs restores song navigation', async (t) => {
+  t.after(()=>{delete global.window})
+  const pages=[3,1,2].map(page=>({id:page,title:`Page ${page}`,bin:'Sermon & Events',mediaType:'image',url:`nsc-media://asset/${page}.png`,
+    fitMode:'contain',documentId:'sermon',documentTitle:'Sermon',documentPage:page,documentPages:3}))
+  let liveState={...useStudioStore.getState().liveState}
+  global.window={nscApi:{updateLiveState:async patch=>(liveState={...liveState,...patch})}}
+  useStudioStore.setState({mediaAssets:pages,selectedDocumentId:null,liveState})
+  await useStudioStore.getState().triggerForegroundGraphic(pages.find(page=>page.documentPage===1))
+  assert.equal(liveState.currentSlide,null);assert.equal(liveState.activeSongId,null)
+  await useStudioStore.getState().stepSlide(1)
+  assert.equal(liveState.foregroundMedia.documentPage,2)
+  await useStudioStore.getState().stepSlide(-1)
+  assert.equal(liveState.foregroundMedia.documentPage,1)
+  useStudioStore.getState().selectSongForDeck(10)
+  assert.equal(useStudioStore.getState().selectedDocumentId,null)
+})
+
 test('number shortcuts cue the visible song even when a different song is live', async (t) => {
   t.after(() => { delete global.window })
   const makeSong = (id, title) => ({ id, titlePrimary: title, titleSecondary: '', author: '',

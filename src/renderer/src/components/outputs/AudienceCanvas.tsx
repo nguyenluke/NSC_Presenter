@@ -1,6 +1,7 @@
 import React, { useLayoutEffect, useRef, useState } from 'react'
 import { LivePresentationState, MediaAsset, OutputProfile } from '@shared/types'
 import { customTextGeometry, normalizeTextLayout } from '@shared/textLayout'
+import { textStyle } from '@shared/textStyle'
 
 interface AudienceCanvasProps {
   liveState: LivePresentationState
@@ -139,6 +140,7 @@ export const AudienceCanvas: React.FC<AudienceCanvasProps> = ({ liveState, profi
                 style={{
                   fontSize: `${profile.primaryFontSize}px`,
                   color: profile.primaryColor,
+                  ...textStyle(profile.primaryTextStyle, false),
                   textShadow:
                     '0 4px 22px rgba(0,0,0,0.92), 0 2px 6px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,1)'
                 }}
@@ -153,6 +155,7 @@ export const AudienceCanvas: React.FC<AudienceCanvasProps> = ({ liveState, profi
                 style={{
                   fontSize: `${profile.secondaryFontSize}px`,
                   color: profile.secondaryColor,
+                  ...textStyle(profile.secondaryTextStyle, true),
                   textShadow:
                     '0 4px 18px rgba(0,0,0,0.92), 0 2px 5px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,1)'
                 }}

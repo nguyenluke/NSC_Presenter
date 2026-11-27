@@ -64,6 +64,8 @@ export class PresenterDatabase {
       fs.copyFileSync(this.dbFilePath, this.dbFilePath + '.before-sync.bak')
     }
     this.createSchema()
+    const mediaColumns = this.db.exec('PRAGMA table_info(media_assets)')[0].values.map(row => String(row[1]))
+    if (!mediaColumns.includes('document_json')) this.db.run('ALTER TABLE media_assets ADD COLUMN document_json TEXT')
     this.seedDefaultsIfNeeded()
     for (const song of this.getAllSongs()) {
       if (!this.syncRowByLocalId(song.id)) this.markSongDirty(song.id, song)
@@ -569,23 +571,48 @@ export class PresenterDatabase {
     const assets: MediaAsset[] = []
     while (stmt.step()) {
       const row = stmt.getAsObject()
+      let document: Partial<MediaAsset> = {}
+      try {
+        const value = row.document_json ? JSON.parse(String(row.document_json)) : null
+        if (value && typeof value.documentId === 'string' && typeof value.documentTitle === 'string' &&
+            Number.isInteger(value.documentPage) && Number.isInteger(value.documentPages) && value.documentPage > 0 && value.documentPage <= value.documentPages) {
+          document = { documentId: value.documentId, documentTitle: value.documentTitle, documentPage: value.documentPage, documentPages: value.documentPages }
+        }
+      } catch { /* Older or damaged document metadata remains an ordinary media item. */ }
       assets.push({
         id: Number(row.id),
         title: String(row.title),
         bin: String(row.bin) as MediaBin,
         mediaType: String(row.media_type) as MediaAsset['mediaType'],
         url: String(row.url),
-        fitMode: (String(row.fit_mode) as 'cover' | 'contain') || 'cover'
+        fitMode: (String(row.fit_mode) as 'cover' | 'contain') || 'cover',
+        ...document
       })
     }
     stmt.free()
     return assets
   }
 
+  public getPreferredLogo(): MediaAsset | null {
+    const setting = this.db.exec("SELECT value FROM sync_settings WHERE key = 'logo_media_id'")
+    const id = setting.length ? Number(setting[0].values[0][0]) : null
+    const logos = this.getMediaAssets().filter(asset => asset.bin === 'Logos')
+    return logos.find(asset => asset.id === id) ?? logos[0] ?? null
+  }
+
+  public setPreferredLogo(id: number): MediaAsset {
+    const logo = this.getMediaAssets().find(asset => asset.id === id && asset.bin === 'Logos')
+    if (!logo) throw new Error('Choose an image or video from the Logos folder.')
+    this.db.run("INSERT OR REPLACE INTO sync_settings (key,value) VALUES ('logo_media_id',?)", [String(id)])
+    this.persist()
+    return logo
+  }
+
   public addMediaAsset(asset: Omit<MediaAsset, 'id'>, shouldPersist = true): MediaAsset {
     this.db.run(
-      'INSERT INTO media_assets (title, bin, media_type, url, fit_mode) VALUES (?, ?, ?, ?, ?)',
-      [asset.title, asset.bin, asset.mediaType, asset.url, asset.fitMode]
+      'INSERT INTO media_assets (title, bin, media_type, url, fit_mode, document_json) VALUES (?, ?, ?, ?, ?, ?)',
+      [asset.title, asset.bin, asset.mediaType, asset.url, asset.fitMode, asset.documentId ? JSON.stringify({
+        documentId: asset.documentId, documentTitle: asset.documentTitle, documentPage: asset.documentPage, documentPages: asset.documentPages }) : null]
     )
     const idRes = this.db.exec('SELECT last_insert_rowid() AS id')
     const newId = Number(idRes[0].values[0][0])
@@ -597,6 +624,33 @@ export class PresenterDatabase {
     this.db.run('DELETE FROM media_assets WHERE id = ?', [id])
     this.db.run("DELETE FROM service_items WHERE item_type = 'media' AND target_id = ?", [id])
     this.persist()
+  }
+
+  public addDocumentPages(pages: Omit<MediaAsset, 'id'>[]): MediaAsset[] {
+    const original = this.db.export()
+    this.db.run('BEGIN')
+    try {
+      for (const page of pages) this.addMediaAsset(page, false)
+      this.db.run('COMMIT')
+    } catch (error) { this.db.run('ROLLBACK'); throw error }
+    try { this.persist() }
+    catch (error) { this.db.close(); this.db = new this.SQL.Database(original); throw error }
+    return this.getMediaAssets()
+  }
+
+  public deleteDocument(documentId: string): MediaAsset[] {
+    const ids = this.getMediaAssets().filter(asset => asset.documentId === documentId).map(asset => asset.id)
+    const original = this.db.export()
+    this.db.run('BEGIN')
+    try {
+      for (const id of ids) {
+        this.db.run('DELETE FROM media_assets WHERE id = ?', [id])
+        this.db.run("DELETE FROM service_items WHERE item_type = 'media' AND target_id = ?", [id])
+      }
+      this.db.run('COMMIT')
+    } catch (error) { this.db.run('ROLLBACK'); throw error }
+    try { this.persist() } catch (error) { this.db.close(); this.db = new this.SQL.Database(original); throw error }
+    return this.getMediaAssets()
   }
 
   public getAudioTracks(): AudioTrack[] {

@@ -12,6 +12,7 @@ app.whenReady().then(async () => {
       import React from 'react';
       import { createRoot } from 'react-dom/client';
       import { AudienceCanvas } from './src/renderer/src/components/outputs/AudienceCanvas';
+      import { StageMonitorCanvas } from './src/renderer/src/components/outputs/StageMonitorCanvas';
       import { OperatorStudioView } from './src/renderer/src/views/OperatorStudioView';
       import { useStudioStore } from './src/renderer/src/store/useStudioStore';
       import { DEFAULT_SHORTCUTS } from './src/shared/keyboardShortcuts';
@@ -48,6 +49,18 @@ app.whenReady().then(async () => {
         await wait(); await wait();
         const bottom = document.querySelector('[data-text-position="custom"] > div').getBoundingClientRect();
         check(bottom.bottom<=1065, 'Custom bottom clipped');
+        root.render(<AudienceCanvas profile={{...profile,verticalAlign:'custom',customTextLayout:{...layout,y:50},
+          primaryTextStyle:{fontFamily:'Arial',bold:false,italic:true,stretch:120,tracking:2},
+          secondaryTextStyle:{fontFamily:'Georgia',bold:true,italic:false}}} liveState={state} />);
+        await wait(); await wait();
+        const styled=document.querySelector('[data-text-position="custom"] > div');
+        const first=styled.querySelector('p'),second=styled.querySelectorAll('p')[1];
+        check(getComputedStyle(first).fontWeight==='400','Bold off not honored');
+        check(getComputedStyle(first).fontStyle==='italic','Italic not honored');
+        check(getComputedStyle(first).fontFamily.includes('Arial'),'Font family not honored');
+        check(getComputedStyle(first).letterSpacing==='2px','Tracking not honored');
+        check(Math.abs(first.getBoundingClientRect().width-styled.getBoundingClientRect().width)<2,'Stretched text overflows its box');
+        check(getComputedStyle(second).fontStyle==='normal','Secondary italic off not honored');
         // Exercise the real operator handler and shortcut editor, with isolated fake IPC.
         let live = {...useStudioStore.getState().liveState, activeSongId:1, activeSlideGlobalIndex:0};
         let updates = 0;
@@ -96,6 +109,40 @@ app.whenReady().then(async () => {
         check(useStudioStore.getState().outputProfiles[0].customTextLayout.width===30,'Draft width did not apply');
         button('Top').click(); await wait();
         check(useStudioStore.getState().outputProfiles[0].verticalAlign==='top','Preset did not replace custom positioning');
+        check(!document.querySelector('[aria-label="Language 1 font"]'),'Advanced font controls visible by default');
+        const advanced=[...document.querySelectorAll('button')].find(el=>el.textContent.includes('Advanced text settings'));
+        advanced.click();await wait();
+        check(advanced.getAttribute('aria-expanded')==='true','Advanced settings did not expand');
+        const font=document.querySelector('[aria-label="Language 1 font"]');
+        font.value='Georgia';font.dispatchEvent(new Event('change',{bubbles:true}));await wait();
+        document.querySelector('[aria-label="Language 1 bold"]').click();await wait();
+        check(useStudioStore.getState().outputProfiles[0].primaryTextStyle.fontFamily==='Georgia','Font picker did not save');
+        check(useStudioStore.getState().outputProfiles[0].primaryTextStyle.bold===false,'Style controls overwrote or missed selection');
+        advanced.click();await wait();
+        check(!document.querySelector('[aria-label="Language 1 font"]'),'Advanced settings did not collapse');
+        check(useStudioStore.getState().outputProfiles[0].primaryTextStyle.fontFamily==='Georgia','Hiding advanced settings changed saved style');
+        advanced.click();await wait();
+        button('Reset text to defaults').click();await wait();
+        const resetProfile=useStudioStore.getState().outputProfiles[0];
+        check(resetProfile.verticalAlign==='center' && resetProfile.languageMode==='both','Reset did not restore centered bilingual layout');
+        check(resetProfile.primaryFontSize===64 && resetProfile.secondaryFontSize===42 && resetProfile.secondaryColor==='#FCD34D','Reset did not restore sizes/colors');
+        check(!resetProfile.primaryTextStyle.fontFamily && resetProfile.primaryTextStyle.bold===undefined,'Reset retained customized typography');
+        check(document.querySelector('[aria-label="Language 1 font"]').value==='','Reset font picker is stale');
+        check(resetProfile.customTextLayout.width===88,'Reset retained custom position');
+        check(resetProfile.id===profile.id && resetProfile.windowMode==='virtual','Reset changed screen configuration');
+        document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));await wait();
+        useStudioStore.setState({liveState:{...useStudioStore.getState().liveState,timerSeconds:-61,timerMode:'countdown'}});
+        button('Timers').click();await wait();
+        check(document.querySelector('[data-timer-state="OVERTIME"]').classList.contains('text-red-400'),'Operator overtime is not red');
+        const pages=[1,2].map(page=>({id:30+page,title:'Page '+page,bin:'Sermon & Events',mediaType:'image',url:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jWo4AAAAASUVORK5CYII=',fitMode:'contain',documentId:'doc',documentTitle:'Test Sermon',documentPage:page,documentPages:2}));
+        useStudioStore.setState({mediaAssets:pages,selectedDocumentId:'doc'});await wait();
+        check(document.querySelector('[aria-label="Show document page 1"]'),'Document deck did not open');
+        document.querySelector('[aria-label="Show document page 1"]').click();await wait();
+        press('KeyM','m');await wait();check(useStudioStore.getState().liveState.foregroundMedia.documentPage===2,'Document next key failed');
+        const beforeSection=updates;press('KeyC','c');await wait();check(updates===beforeSection,'Song section shortcut fired in sermon deck');
+        root.render(<StageMonitorCanvas profile={profile} liveState={{...useStudioStore.getState().liveState,timerSeconds:-61,timerMode:'countdown'}} />);await wait();
+        check(document.body.textContent.includes('OVERTIME +01:01'),'Stage overtime missing');
+        check(document.querySelector('[alt="Current sermon page"]'),'Stage sermon preview missing');
         return { passed:true, presets:['top','center','bottom'], customNoticeClearance:true, alignment:true, width:true, spacing:true,
           customShortcuts:true, typingSuppression:true, modalSuppression:true, duplicateDetection:true, recordedBinding:true, previewApply:true };
       } catch(error) { return {error:error.message, stack:error.stack}; } };
