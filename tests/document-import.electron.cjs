@@ -37,15 +37,20 @@ app.whenReady().then(async()=>{
     const { PresenterDatabase } = require('../src/main/database.ts')
     const { MediaStorage } = require('../src/main/mediaStorage.ts')
     const { DocumentImporter } = require('../src/main/documentImport.ts')
+    const { importVisualFiles, VISUAL_IMPORT_FILTERS } = require('../src/main/visualImport.ts')
+    for (const ext of ['pdf','ppt','pptx','png','mp4']) assert.ok(VISUAL_IMPORT_FILTERS[0].extensions.includes(ext), 'Default import filter hides '+ext)
     const data=path.join(root,'data'); const db=new PresenterDatabase(data); await db.init()
     const storage=new MediaStorage(data)
     const importer=new DocumentImporter(db, storage, process.env.NSC_PDF_RENDERER_FILE || path.resolve(__dirname,'../out/renderer/index.html'))
     const source=path.join(root,'test-sermon.pdf'); pdfFixture(source)
     const songsBefore=db.getAllSongs(), pendingBefore=db.getPendingSongs(), before=db.getMediaAssets().length
     const progress=[]
-    const result=await importer.import(source, p=>progress.push(p))
+    const imported=await importVisualFiles([source], 'Worship Designs', db, storage, importer, p=>progress.push(p))
+    const result={mediaAssets:imported,documentId:imported.find(asset=>asset.documentId).documentId}
     const pages=result.mediaAssets.filter(asset=>asset.documentId===result.documentId).sort((a,b)=>a.documentPage-b.documentPage)
     assert.equal(pages.length,2)
+    assert.ok(pages.every(page=>page.bin==='Sermon & Events'))
+    assert.ok(pages.every(page=>page.url.endsWith('.png')), 'Document was imported as an unrendered image file')
     assert.equal(pages[0].documentPage,1); assert.equal(pages[1].documentPage,2)
     assert.equal(pages[0].fitMode,'contain')
     const sizes=pages.map(page=>nativeImage.createFromPath(path.join(storage.getDirectory(),decodeURIComponent(new URL(page.url).pathname.slice(1)))).getSize())

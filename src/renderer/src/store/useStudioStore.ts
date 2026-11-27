@@ -392,8 +392,10 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
   },
 
   importVisuals: async (bin) => {
+    const existingIds = new Set(get().mediaAssets.map(asset => asset.id))
     const mediaAssets = await window.nscApi.importVisualMedia(bin)
-    set({ mediaAssets })
+    const document = mediaAssets.find(asset => asset.documentId && !existingIds.has(asset.id))
+    set({ mediaAssets, ...(document ? { selectedDocumentId: document.documentId, activeMediaBin: 'Sermon & Events' as const } : {}) })
   },
 
   deleteMedia: async (id) => {

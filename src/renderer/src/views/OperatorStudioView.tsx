@@ -126,6 +126,13 @@ export const OperatorStudioView: React.FC = () => {
   const [showSharedLibrary, setShowSharedLibrary] = useState(false)
   const [showMediaStorage, setShowMediaStorage] = useState(false)
   const [showDocumentImport, setShowDocumentImport] = useState(false)
+  const [visualImportBusy, setVisualImportBusy] = useState(false)
+  const [visualImportMessage, setVisualImportMessage] = useState('')
+  const [visualImportError, setVisualImportError] = useState('')
+  useEffect(() => {
+    if (!visualImportBusy) return
+    return window.nscApi.onDocumentImportProgress(progress => setVisualImportMessage(progress.phase + (progress.total ? ' · ' + progress.completed + '/' + progress.total : '')))
+  }, [visualImportBusy])
   const [showShortcutEditor, setShowShortcutEditor] = useState(false)
   const [shortcutBindings, setShortcutBindings] = useState<ShortcutBindings>(() => structuredClone(DEFAULT_SHORTCUTS))
   const [shortcutError, setShortcutError] = useState('')
@@ -173,7 +180,7 @@ export const OperatorStudioView: React.FC = () => {
   // Global Booth Keyboard Shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (showSharedLibrary || showMediaStorage || showShortcutEditor || showDocumentImport) return
+      if (showSharedLibrary || showMediaStorage || showShortcutEditor || showDocumentImport || visualImportBusy) return
       if (showTextPopover || showThemePopover) {
         if (e.key === 'Escape') {
           e.preventDefault()
@@ -218,6 +225,7 @@ export const OperatorStudioView: React.FC = () => {
     showMediaStorage,
     showShortcutEditor,
     showDocumentImport,
+    visualImportBusy,
     selectedDocumentId,
     shortcutBindings,
     showTextPopover,
@@ -1032,11 +1040,17 @@ export const OperatorStudioView: React.FC = () => {
 
                       <div className="p-2 border-t border-[#191a1d] space-y-1">
                         <button
-                          onClick={() => importVisuals(activeMediaBin)}
+                          disabled={visualImportBusy}
+                          onClick={async () => {
+                            setVisualImportBusy(true); setVisualImportError(''); setVisualImportMessage('Importing…')
+                            try { await importVisuals(activeMediaBin) }
+                            catch (err) { setVisualImportError(err instanceof Error ? err.message : 'Import failed.'); }
+                            finally { setVisualImportBusy(false); setVisualImportMessage('') }
+                          }}
                           className="w-full py-1.5 px-2.5 rounded bg-[#32353e] hover:bg-[#3e424d] text-xs font-semibold text-white flex items-center justify-center gap-1.5"
                         >
                           <FolderPlus className="w-3.5 h-3.5 text-cyan-400" />
-                          + Import Media
+                          {visualImportBusy ? 'Importing…' : '+ Import Media'}
                         </button>
                         <button onClick={() => setShowMediaStorage(true)}
                           className="w-full py-1 px-2.5 rounded hover:bg-[#32353e] text-[11px] text-zinc-400 flex items-center justify-center gap-1.5">
@@ -1046,13 +1060,15 @@ export const OperatorStudioView: React.FC = () => {
                     </div>
 
                     <div className="flex-1 flex flex-col min-w-0">
+                      {visualImportBusy && <p role="status" className="px-3 py-1 text-xs text-cyan-300">{visualImportMessage}</p>}
+                      {visualImportError && <p role="alert" className="px-3 py-1 text-xs text-red-300">{visualImportError}</p>}
                       {activeMediaBin === 'Sermon & Events' && <div className="px-3 py-1 border-b border-[#32353e]">
                         <button onClick={() => setShowDocumentImport(true)} className="text-xs font-semibold text-cyan-300">Import PDF / PowerPoint</button>
                       </div>}
                       <div className="flex-1 overflow-y-auto p-3">
                         {binAssets.length === 0 ? (
                           <div className="h-full border border-dashed border-[#343741] rounded flex items-center justify-center text-xs text-zinc-400">
-                            Click &quot;+ Import Media&quot; on the left to add `.png`, `.jpg`, or `.mp4` visuals.
+                            Click &quot;+ Import Media&quot; to add images, videos, PDF or PowerPoint. Documents appear in Sermon &amp; Events.
                           </div>
                         ) : (
                           <div className="grid grid-cols-4 xl:grid-cols-6 gap-3">

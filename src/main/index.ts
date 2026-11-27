@@ -21,6 +21,7 @@ import { getAppIconPath } from './appIcon'
 import { KeyboardSettings } from './keyboardSettings'
 import { tickTimer } from '../shared/timer'
 import { DocumentImporter } from './documentImport'
+import { importVisualFiles, VISUAL_IMPORT_FILTERS } from './visualImport'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -251,47 +252,23 @@ function registerIpcHandlers(): void {
   })
 
   // Import Visual Images & Looping Videos
-  ipcMain.handle('nsc:import-visual-media', async (_e, targetBin: MediaBin): Promise<MediaAsset[]> => {
-    if (!operatorWindow) return db.getMediaAssets()
-    const result = await dialog.showOpenDialog(operatorWindow, {
-      title: `Import Visuals into "${targetBin}"`,
-      properties: ['openFile', 'multiSelections'],
-      filters: [
-        {
-          name: 'Visual Images & Motion Videos',
-          extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'webm', 'mov']
-        }
-      ]
+  ipcMain.handle('nsc:import-visual-media', async (event, targetBin: MediaBin): Promise<MediaAsset[]> => {
+    requireOperator(event)
+    if (documentImporter.busy || mediaStorage.busy) throw new Error('Wait for the current media operation to finish.')
+    const result = await dialog.showOpenDialog(operatorWindow!, {
+      title: 'Import Images, Videos or Sermon Documents', properties: ['openFile', 'multiSelections'], filters: VISUAL_IMPORT_FILTERS
     })
-
-    if (result.canceled || result.filePaths.length === 0) {
-      return db.getMediaAssets()
-    }
-
-    const mediaDir = mediaStorage.getImportDirectory()
-    const videoExts = new Set(['.mp4', '.webm', '.mov'])
-
-    for (const srcPath of result.filePaths) {
-      const ext = path.extname(srcPath).toLowerCase()
-      const baseName = path.basename(srcPath, ext)
-      const safeFileName = `${Date.now()}_${baseName.replace(/[^a-zA-Z0-9_-]/g, '_')}${ext}`
-      fs.copyFileSync(srcPath, path.join(mediaDir, safeFileName))
-
-      const created = db.addMediaAsset({
-        title: baseName,
-        bin: targetBin,
-        mediaType: videoExts.has(ext) ? 'video' : 'image',
-        url: `nsc-media://asset/${encodeURIComponent(safeFileName)}`,
-        fitMode: targetBin === 'Logos' ? 'contain' : 'cover'
+    if (result.canceled || !result.filePaths.length) return db.getMediaAssets()
+    try {
+      return await importVisualFiles(result.filePaths, targetBin, db, mediaStorage, documentImporter, progress => {
+        if (operatorWindow && !operatorWindow.isDestroyed()) operatorWindow.webContents.send('nsc:document-import-progress', progress)
       })
-
+    } finally {
       if (targetBin === 'Logos') {
-        liveState.logoMedia = db.setPreferredLogo(created.id)
+        liveState.logoMedia = db.getPreferredLogo()
+        displayRouter.broadcast(liveState, db.getOutputProfiles(), operatorWindow)
       }
     }
-
-    if (targetBin === 'Logos') displayRouter.broadcast(liveState, db.getOutputProfiles(), operatorWindow)
-    return db.getMediaAssets()
   })
 
   ipcMain.handle('nsc:delete-media', (_e, id: number) => {

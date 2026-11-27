@@ -135,7 +135,13 @@ app.whenReady().then(async () => {
         button('Timers').click();await wait();
         check(document.querySelector('[data-timer-state="OVERTIME"]').classList.contains('text-red-400'),'Operator overtime is not red');
         const pages=[1,2].map(page=>({id:30+page,title:'Page '+page,bin:'Sermon & Events',mediaType:'image',url:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jWo4AAAAASUVORK5CYII=',fitMode:'contain',documentId:'doc',documentTitle:'Test Sermon',documentPage:page,documentPages:2}));
-        useStudioStore.setState({mediaAssets:pages,selectedDocumentId:'doc'});await wait();
+        window.nscApi.importVisualMedia=async()=>pages;
+        window.nscApi.onDocumentImportProgress=()=>()=>{};
+        useStudioStore.setState({mediaAssets:[],selectedDocumentId:null,activeMediaBin:'Worship Designs'});await wait();
+        const beforeImport=updates;
+        button('+ Import Media').click();await wait();await wait();
+        check(useStudioStore.getState().activeMediaBin==='Sermon & Events','Main import did not switch to sermon bin');
+        check(updates===beforeImport,'Import changed the live output');
         check(document.querySelector('[aria-label="Show document page 1"]'),'Document deck did not open');
         document.querySelector('[aria-label="Show document page 1"]').click();await wait();
         press('KeyM','m');await wait();check(useStudioStore.getState().liveState.foregroundMedia.documentPage===2,'Document next key failed');
