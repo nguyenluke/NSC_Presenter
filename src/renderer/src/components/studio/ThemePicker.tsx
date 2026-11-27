@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { textStyle } from '@shared/textStyle'
 import { Check, Palette, X } from 'lucide-react'
 import { LivePresentationState, OutputProfile } from '@shared/types'
 import { ScaledMonitorFrame } from '../outputs/ScaledMonitorFrame'
@@ -30,7 +31,9 @@ export const ThemePicker: React.FC<ThemePickerProps> = ({ profile, liveState, on
         <div className="grid grid-cols-2 gap-2.5 p-3">
           {PRESENTATION_THEMES.map((theme) => {
             const selected = Object.entries(theme.settings).every(([key, value]) =>
-              profile[key as keyof OutputProfile] === value)
+              profile[key as keyof OutputProfile] === value) &&
+              JSON.stringify(textStyle(profile.primaryTextStyle, false)) === JSON.stringify(textStyle(undefined, false)) &&
+              JSON.stringify(textStyle(profile.secondaryTextStyle, true)) === JSON.stringify(textStyle(undefined, true))
             return (
               <button key={theme.id} disabled={applying !== null} aria-label={`Apply ${theme.name} theme`} aria-pressed={selected}
                 className={`studio-theme-card ${selected ? 'is-selected' : ''}`}
@@ -39,7 +42,7 @@ export const ThemePicker: React.FC<ThemePickerProps> = ({ profile, liveState, on
                   try { await onApply(theme) }
                   catch (err) { setError(err instanceof Error ? err.message : 'Could not apply theme.'); setApplying(null) }
                 }}>
-                <ScaledMonitorFrame liveState={sampleState} profile={{ ...profile, ...theme.settings, screenType: 'audience' }} staticMedia className="w-full aspect-video" />
+                <ScaledMonitorFrame liveState={sampleState} profile={{ ...profile, ...theme.settings, primaryTextStyle: {}, secondaryTextStyle: {}, screenType: 'audience' }} staticMedia className="w-full aspect-video" />
                 <div className="px-2 py-1.5 flex items-center justify-between gap-1">
                   <div className="min-w-0"><div className="text-[11px] font-semibold truncate">{applying === theme.id ? 'Applying…' : theme.name}</div><div className="text-[10px] text-zinc-400 truncate">{theme.description}</div></div>
                   {selected && <Check size={13} className="text-blue-400 shrink-0" />}

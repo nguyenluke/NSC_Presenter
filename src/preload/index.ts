@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { LibraryConfig, SongSyncStatus, SongSyncResult } from '../shared/songSync'
 import { ShortcutBindings } from '../shared/keyboardShortcuts'
+import { DocumentImportProgress } from '../shared/documents'
 import {
   AudioCategory,
   AudioTrack,
@@ -19,6 +20,14 @@ import {
 interface LibraryPayload { songs: Song[]; serviceItems: ServiceItem[]; status: SongSyncStatus }
 
 const nscApi = {
+  importSermonDocument: (): Promise<{ mediaAssets: MediaAsset[]; documentId: string } | null> => ipcRenderer.invoke('nsc:import-document'),
+  cancelDocumentImport: (): Promise<void> => ipcRenderer.invoke('nsc:cancel-document-import'),
+  deleteDocument: (id: string): Promise<{ mediaAssets: MediaAsset[]; serviceItems: ServiceItem[] }> => ipcRenderer.invoke('nsc:delete-document', id),
+  onDocumentImportProgress: (callback: (progress: DocumentImportProgress) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: DocumentImportProgress): void => callback(progress)
+    ipcRenderer.on('nsc:document-import-progress', handler)
+    return () => ipcRenderer.removeListener('nsc:document-import-progress', handler)
+  },
   getShortcuts: (): Promise<ShortcutBindings> => ipcRenderer.invoke('nsc:get-shortcuts'),
   saveShortcuts: (bindings: ShortcutBindings): Promise<ShortcutBindings> => ipcRenderer.invoke('nsc:save-shortcuts', bindings),
   mediaStorageStatus: (): Promise<MediaStorageStatus> => ipcRenderer.invoke('nsc:media-storage-status'),

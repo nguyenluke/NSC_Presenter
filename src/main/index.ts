@@ -19,6 +19,9 @@ import { LibraryConfig } from '../shared/songSync'
 import { MediaStorage, mediaFileName } from './mediaStorage'
 import { getAppIconPath } from './appIcon'
 import { KeyboardSettings } from './keyboardSettings'
+import { tickTimer } from '../shared/timer'
+import { DocumentImporter } from './documentImport'
+import { importVisualFiles, VISUAL_IMPORT_FILTERS } from './visualImport'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -39,6 +42,7 @@ let songLibrary: SongLibrarySync
 let displayRouter: DisplayRouter
 let timerInterval: NodeJS.Timeout | null = null
 let mediaStorage: MediaStorage
+let documentImporter: DocumentImporter
 let choosingMediaFolder = false
 
 let liveState: LivePresentationState = {
@@ -112,15 +116,7 @@ function startLiveTimerLoop(): void {
   if (timerInterval) clearInterval(timerInterval)
   timerInterval = setInterval(() => {
     if (!liveState.timerRunning) return
-    if (liveState.timerMode === 'countdown') {
-      if (liveState.timerSeconds > 0) {
-        liveState = { ...liveState, timerSeconds: liveState.timerSeconds - 1 }
-      } else {
-        liveState = { ...liveState, timerRunning: false }
-      }
-    } else {
-      liveState = { ...liveState, timerSeconds: liveState.timerSeconds + 1 }
-    }
+    liveState = tickTimer(liveState)
     displayRouter.broadcast(liveState, db.getOutputProfiles(), operatorWindow)
   }, 1000)
 }
@@ -134,6 +130,24 @@ function registerIpcHandlers(): void {
   }
   const libraryPayload = () => ({ songs: db.getAllSongs(), serviceItems: db.getServiceItems(), status: songLibrary.status() })
   const keyboardSettings = new KeyboardSettings(db.getStorageDirectory())
+  ipcMain.handle('nsc:import-document', async (event) => {
+    requireOperator(event)
+    if (documentImporter.busy) throw new Error('A sermon import is already in progress.')
+    const result = await dialog.showOpenDialog(operatorWindow!, {
+      title: 'Import Sermon Slides', properties: ['openFile'],
+      filters: [{ name: 'Sermon Documents', extensions: ['pdf','ppt','pptx'] }]
+    })
+    if (result.canceled || !result.filePaths[0]) return null
+    return documentImporter.import(result.filePaths[0], progress => {
+      if (operatorWindow && !operatorWindow.isDestroyed()) operatorWindow.webContents.send('nsc:document-import-progress', progress)
+    })
+  })
+  ipcMain.handle('nsc:cancel-document-import', (event) => { requireOperator(event); documentImporter.cancel() })
+  ipcMain.handle('nsc:delete-document', (event, id: string) => {
+    requireOperator(event)
+    if (typeof id !== 'string' || id.length > 100) throw new Error('Invalid document ID.')
+    return { mediaAssets: db.deleteDocument(id), serviceItems: db.getServiceItems() }
+  })
   ipcMain.handle('nsc:get-shortcuts', (event) => { requireOperator(event); return keyboardSettings.read() })
   ipcMain.handle('nsc:save-shortcuts', (event, value: unknown) => { requireOperator(event); return keyboardSettings.save(value) })
   ipcMain.handle('nsc:media-storage-status', (event) => {
@@ -142,7 +156,7 @@ function registerIpcHandlers(): void {
   })
   ipcMain.handle('nsc:choose-media-folder', async (event) => {
     requireOperator(event)
-    if (choosingMediaFolder || mediaStorage.busy) throw new Error('A media folder change is already in progress.')
+    if (choosingMediaFolder || mediaStorage.busy || documentImporter.busy) throw new Error('Wait for the current media operation to finish.')
     choosingMediaFolder = true
     try {
       const result = await dialog.showOpenDialog(operatorWindow!, {
@@ -191,7 +205,7 @@ function registerIpcHandlers(): void {
         mediaAssets.find((m) => m.bin === 'Worship Designs') || mediaAssets[0]
     }
     if (!liveState.logoMedia) {
-      liveState.logoMedia = mediaAssets.find((m) => m.bin === 'Logos') || null
+      liveState.logoMedia = db.getPreferredLogo()
     }
     return {
       songs: db.getAllSongs(),
@@ -206,6 +220,7 @@ function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('nsc:update-live-state', (_e, partial: Partial<LivePresentationState>) => {
+    if (partial.logoMedia) partial.logoMedia = db.setPreferredLogo(partial.logoMedia.id)
     liveState = { ...liveState, ...partial }
     displayRouter.broadcast(liveState, db.getOutputProfiles(), operatorWindow)
     return liveState
@@ -237,46 +252,23 @@ function registerIpcHandlers(): void {
   })
 
   // Import Visual Images & Looping Videos
-  ipcMain.handle('nsc:import-visual-media', async (_e, targetBin: MediaBin): Promise<MediaAsset[]> => {
-    if (!operatorWindow) return db.getMediaAssets()
-    const result = await dialog.showOpenDialog(operatorWindow, {
-      title: `Import Visuals into "${targetBin}"`,
-      properties: ['openFile', 'multiSelections'],
-      filters: [
-        {
-          name: 'Visual Images & Motion Videos',
-          extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'webm', 'mov']
-        }
-      ]
+  ipcMain.handle('nsc:import-visual-media', async (event, targetBin: MediaBin): Promise<MediaAsset[]> => {
+    requireOperator(event)
+    if (documentImporter.busy || mediaStorage.busy) throw new Error('Wait for the current media operation to finish.')
+    const result = await dialog.showOpenDialog(operatorWindow!, {
+      title: 'Import Images, Videos or Sermon Documents', properties: ['openFile', 'multiSelections'], filters: VISUAL_IMPORT_FILTERS
     })
-
-    if (result.canceled || result.filePaths.length === 0) {
-      return db.getMediaAssets()
-    }
-
-    const mediaDir = mediaStorage.getImportDirectory()
-    const videoExts = new Set(['.mp4', '.webm', '.mov'])
-
-    for (const srcPath of result.filePaths) {
-      const ext = path.extname(srcPath).toLowerCase()
-      const baseName = path.basename(srcPath, ext)
-      const safeFileName = `${Date.now()}_${baseName.replace(/[^a-zA-Z0-9_-]/g, '_')}${ext}`
-      fs.copyFileSync(srcPath, path.join(mediaDir, safeFileName))
-
-      const created = db.addMediaAsset({
-        title: baseName,
-        bin: targetBin,
-        mediaType: videoExts.has(ext) ? 'video' : 'image',
-        url: `nsc-media://asset/${encodeURIComponent(safeFileName)}`,
-        fitMode: 'cover'
+    if (result.canceled || !result.filePaths.length) return db.getMediaAssets()
+    try {
+      return await importVisualFiles(result.filePaths, targetBin, db, mediaStorage, documentImporter, progress => {
+        if (operatorWindow && !operatorWindow.isDestroyed()) operatorWindow.webContents.send('nsc:document-import-progress', progress)
       })
-
+    } finally {
       if (targetBin === 'Logos') {
-        liveState.logoMedia = created
+        liveState.logoMedia = db.getPreferredLogo()
+        displayRouter.broadcast(liveState, db.getOutputProfiles(), operatorWindow)
       }
     }
-
-    return db.getMediaAssets()
   })
 
   ipcMain.handle('nsc:delete-media', (_e, id: number) => {
@@ -355,6 +347,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('nsc:import-backup', async (): Promise<InitialBootstrapPayload | null> => {
     if (!operatorWindow) return null
+    if (documentImporter.busy) throw new Error('Wait for the sermon document import to finish before restoring a backup.')
     if (songLibrary.status().busy) throw new Error('Wait for library synchronization to finish before restoring a backup.')
     const res = await dialog.showOpenDialog(operatorWindow, {
       title: 'Import NSC Presenter Library Backup',
@@ -362,6 +355,7 @@ function registerIpcHandlers(): void {
       filters: [{ name: 'NSC Presenter SQLite Library', extensions: ['sqlite', 'db'] }]
     })
     if (res.canceled || res.filePaths.length === 0) return null
+    if (documentImporter.busy) throw new Error('Wait for the sermon document import to finish before restoring a backup.')
     if (songLibrary.status().busy) throw new Error('Wait for library synchronization to finish before restoring a backup.')
     fs.copyFileSync(res.filePaths[0], db.getDatabaseFilePath())
     db.loadFromDisk()
@@ -404,6 +398,7 @@ app.whenReady().then(async () => {
 
   db = new PresenterDatabase()
   await db.init()
+  documentImporter = new DocumentImporter(db, mediaStorage)
   songLibrary = new SongLibrarySync(db)
 
   const preloadPath = path.join(__dirname, '../preload/index.js')

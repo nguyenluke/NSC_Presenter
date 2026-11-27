@@ -36,8 +36,8 @@ import {
   X
 } from 'lucide-react'
 import { MediaBin, OutputProfile, Song } from '@shared/types'
+import { timerDisplay } from '@shared/timer'
 import { ScaledMonitorFrame } from '../components/outputs/ScaledMonitorFrame'
-import { formatTimerSeconds } from '../components/outputs/StageMonitorCanvas'
 import { AudioBinDrawer } from '../components/studio/AudioBinDrawer'
 import { BibleView } from '../components/studio/BibleView'
 import { DisplayMatrixModal } from '../components/studio/DisplayMatrixModal'
@@ -47,6 +47,8 @@ import { SongSlidePreview } from '../components/studio/SongSlidePreview'
 import { PresentationTheme } from '../components/studio/presentationThemes'
 import { SharedLibraryModal } from '../components/studio/SharedLibraryModal'
 import { MediaStorageModal } from '../components/studio/MediaStorageModal'
+import { DocumentImportModal } from '../components/studio/DocumentImportModal'
+import { DocumentDeck } from '../components/studio/DocumentDeck'
 import { KeyboardShortcutsModal } from '../components/studio/KeyboardShortcutsModal'
 import { DEFAULT_SHORTCUTS, SHORTCUT_ACTIONS, ShortcutBindings, findShortcutAction, shortcutLabel } from '@shared/keyboardShortcuts'
 import { QuickSearchModal } from '../components/studio/QuickSearchModal'
@@ -74,6 +76,8 @@ export const OperatorStudioView: React.FC = () => {
     dismissDisplayAlert,
     storagePath,
     selectedSongId,
+    selectedDocumentId,
+    selectDocumentDeck,
     activeMediaBin,
     liveState,
     selectSongForDeck,
@@ -121,6 +125,14 @@ export const OperatorStudioView: React.FC = () => {
   const [editingSong, setEditingSong] = useState<Song | null>(null)
   const [showSharedLibrary, setShowSharedLibrary] = useState(false)
   const [showMediaStorage, setShowMediaStorage] = useState(false)
+  const [showDocumentImport, setShowDocumentImport] = useState(false)
+  const [visualImportBusy, setVisualImportBusy] = useState(false)
+  const [visualImportMessage, setVisualImportMessage] = useState('')
+  const [visualImportError, setVisualImportError] = useState('')
+  useEffect(() => {
+    if (!visualImportBusy) return
+    return window.nscApi.onDocumentImportProgress(progress => setVisualImportMessage(progress.phase + (progress.total ? ' · ' + progress.completed + '/' + progress.total : '')))
+  }, [visualImportBusy])
   const [showShortcutEditor, setShowShortcutEditor] = useState(false)
   const [shortcutBindings, setShortcutBindings] = useState<ShortcutBindings>(() => structuredClone(DEFAULT_SHORTCUTS))
   const [shortcutError, setShortcutError] = useState('')
@@ -168,7 +180,7 @@ export const OperatorStudioView: React.FC = () => {
   // Global Booth Keyboard Shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (showSharedLibrary || showMediaStorage || showShortcutEditor) return
+      if (showSharedLibrary || showMediaStorage || showShortcutEditor || showDocumentImport || visualImportBusy) return
       if (showTextPopover || showThemePopover) {
         if (e.key === 'Escape') {
           e.preventDefault()
@@ -201,7 +213,7 @@ export const OperatorStudioView: React.FC = () => {
       else if (action === 'clearMedia') void updateLiveFlags({ clearBackground: true, foregroundMedia: null })
       else if (action === 'logo') void updateLiveFlags({ showLogo: !liveState.showLogo, blackout: false })
       else if (action === 'blackout') void updateLiveFlags({ blackout: !liveState.blackout })
-      else if (action.startsWith('section')) void jumpToSectionNumber(Number(action.slice(7)))
+      else if (action.startsWith('section') && !selectedDocumentId) void jumpToSectionNumber(Number(action.slice(7)))
     }
 
     window.addEventListener('keydown', onKeyDown)
@@ -212,6 +224,9 @@ export const OperatorStudioView: React.FC = () => {
     showSharedLibrary,
     showMediaStorage,
     showShortcutEditor,
+    showDocumentImport,
+    visualImportBusy,
+    selectedDocumentId,
     shortcutBindings,
     showTextPopover,
     showThemePopover,
@@ -228,6 +243,8 @@ export const OperatorStudioView: React.FC = () => {
   )
 
   const deckSlides = useMemo(() => flattenSongSlides(selectedSong), [selectedSong])
+  const documentPages = useMemo(() => mediaAssets.filter(asset => asset.documentId === selectedDocumentId)
+    .sort((a,b) => (a.documentPage ?? 0) - (b.documentPage ?? 0)), [mediaAssets, selectedDocumentId])
 
   const filteredSongs = useMemo(() => {
     const q = libraryFilter.trim().toLowerCase()
@@ -240,7 +257,16 @@ export const OperatorStudioView: React.FC = () => {
   }, [songs, libraryFilter])
 
   const binAssets = useMemo(
-    () => mediaAssets.filter((m) => m.bin === activeMediaBin),
+    () => {
+      const assets = mediaAssets.filter((m) => m.bin === activeMediaBin)
+      const seen = new Set<string>()
+      return assets.flatMap(asset => {
+        if (!asset.documentId) return [asset]
+        if (seen.has(asset.documentId)) return []
+        seen.add(asset.documentId)
+        return [assets.filter(page => page.documentId === asset.documentId).sort((a,b)=>(a.documentPage ?? 0)-(b.documentPage ?? 0))[0]]
+      })
+    },
     [mediaAssets, activeMediaBin]
   )
 
@@ -285,7 +311,7 @@ export const OperatorStudioView: React.FC = () => {
 
   const applyQuickThemePreset = async (theme: PresentationTheme): Promise<void> => {
     for (const profile of audienceProfiles) {
-      await saveOutputProfile({ ...profile, ...theme.settings })
+      await saveOutputProfile({ ...profile, ...theme.settings, primaryTextStyle: {}, secondaryTextStyle: {} })
     }
     setShowThemePopover(false)
   }
@@ -294,7 +320,9 @@ export const OperatorStudioView: React.FC = () => {
     const currentProfiles = useStudioStore.getState().outputProfiles
     for (const profile of currentProfiles.filter((item) => item.screenType === 'audience' &&
       (target === 'all' || item.id === target))) {
-      await saveOutputProfile({ ...profile, ...patch })
+      await saveOutputProfile({ ...profile, ...patch,
+        primaryTextStyle: patch.primaryTextStyle ? { ...profile.primaryTextStyle, ...patch.primaryTextStyle } : profile.primaryTextStyle,
+        secondaryTextStyle: patch.secondaryTextStyle ? { ...profile.secondaryTextStyle, ...patch.secondaryTextStyle } : profile.secondaryTextStyle })
     }
   }
 
@@ -364,6 +392,7 @@ export const OperatorStudioView: React.FC = () => {
           <button
             onClick={() => {
               setEditingSong(null)
+              selectDocumentDeck(null)
               setCenterMode('edit')
             }}
             className="px-3 py-1 rounded hover:bg-[#383a40] flex flex-col items-center gap-0.5 text-zinc-200"
@@ -401,6 +430,7 @@ export const OperatorStudioView: React.FC = () => {
               setEditingSong(selectedSong)
               setCenterMode('edit')
             }}
+            disabled={Boolean(selectedDocumentId)}
             className={`px-3.5 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${
               centerMode === 'edit'
                 ? 'bg-[#3b3e45] text-white shadow'
@@ -413,6 +443,7 @@ export const OperatorStudioView: React.FC = () => {
 
           <button
             onClick={() => setCenterMode('reflow')}
+            disabled={Boolean(selectedDocumentId)}
             className={`px-3.5 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${
               centerMode === 'reflow'
                 ? 'bg-[#3b3e45] text-white shadow'
@@ -797,6 +828,8 @@ export const OperatorStudioView: React.FC = () => {
 
               {/* ZONE 3 & 4: CENTER SLIDE CANVAS + MEDIA BIN */}
               <main className="studio-deck flex-1 flex flex-col min-w-0 min-h-0 bg-[#18191b]">
+                {selectedDocumentId ? <DocumentDeck pages={documentPages} liveState={liveState}
+                  onCue={asset => void triggerForegroundGraphic(asset)} onClose={() => selectDocumentDeck(null)} /> : <>
                 {selectedSong && temporarySongs[selectedSong.id] && (
                   <div role="status" className="px-4 py-2 bg-cyan-950/50 border-b border-cyan-700/40 flex items-center gap-3 flex-wrap text-xs">
                     <span className="text-cyan-200 flex-1">Temporary song edits — not saved or queued for sync. Closing the app discards them.</span>
@@ -978,6 +1011,7 @@ export const OperatorStudioView: React.FC = () => {
                   </div>
                 </div>
 
+                </>}
                 {/* MEDIA BIN */}
                 {mediaBinOpen && (
                   <section className="studio-media-bin h-48 bg-[#1e1f23] border-t border-[#111214] flex min-h-0 shrink-0">
@@ -1006,11 +1040,17 @@ export const OperatorStudioView: React.FC = () => {
 
                       <div className="p-2 border-t border-[#191a1d] space-y-1">
                         <button
-                          onClick={() => importVisuals(activeMediaBin)}
+                          disabled={visualImportBusy}
+                          onClick={async () => {
+                            setVisualImportBusy(true); setVisualImportError(''); setVisualImportMessage('Importing…')
+                            try { await importVisuals(activeMediaBin) }
+                            catch (err) { setVisualImportError(err instanceof Error ? err.message : 'Import failed.'); }
+                            finally { setVisualImportBusy(false); setVisualImportMessage('') }
+                          }}
                           className="w-full py-1.5 px-2.5 rounded bg-[#32353e] hover:bg-[#3e424d] text-xs font-semibold text-white flex items-center justify-center gap-1.5"
                         >
                           <FolderPlus className="w-3.5 h-3.5 text-cyan-400" />
-                          + Import Media
+                          {visualImportBusy ? 'Importing…' : '+ Import Media'}
                         </button>
                         <button onClick={() => setShowMediaStorage(true)}
                           className="w-full py-1 px-2.5 rounded hover:bg-[#32353e] text-[11px] text-zinc-400 flex items-center justify-center gap-1.5">
@@ -1020,16 +1060,21 @@ export const OperatorStudioView: React.FC = () => {
                     </div>
 
                     <div className="flex-1 flex flex-col min-w-0">
+                      {visualImportBusy && <p role="status" className="px-3 py-1 text-xs text-cyan-300">{visualImportMessage}</p>}
+                      {visualImportError && <p role="alert" className="px-3 py-1 text-xs text-red-300">{visualImportError}</p>}
+                      {activeMediaBin === 'Sermon & Events' && <div className="px-3 py-1 border-b border-[#32353e]">
+                        <button onClick={() => setShowDocumentImport(true)} className="text-xs font-semibold text-cyan-300">Import PDF / PowerPoint</button>
+                      </div>}
                       <div className="flex-1 overflow-y-auto p-3">
                         {binAssets.length === 0 ? (
                           <div className="h-full border border-dashed border-[#343741] rounded flex items-center justify-center text-xs text-zinc-400">
-                            Click &quot;+ Import Media&quot; on the left to add `.png`, `.jpg`, or `.mp4` visuals.
+                            Click &quot;+ Import Media&quot; to add images, videos, PDF or PowerPoint. Documents appear in Sermon &amp; Events.
                           </div>
                         ) : (
                           <div className="grid grid-cols-4 xl:grid-cols-6 gap-3">
                             {binAssets.map((asset) => {
                               const isStandalone = activeMediaBin === 'Sermon & Events'
-                              const isActive = isStandalone
+                              const isActive = activeMediaBin === 'Logos' ? liveState.logoMedia?.id === asset.id : isStandalone
                                 ? liveState.foregroundMedia?.id === asset.id
                                 : liveState.activeBackground?.id === asset.id &&
                                   !liveState.clearBackground
@@ -1038,7 +1083,7 @@ export const OperatorStudioView: React.FC = () => {
                                 <div
                                   key={asset.id}
                                   onClick={() =>
-                                    isStandalone
+                                    activeMediaBin === 'Logos' ? updateLiveFlags({ logoMedia: asset }) : asset.documentId ? selectDocumentDeck(asset.documentId) : isStandalone
                                       ? triggerForegroundGraphic(asset)
                                       : triggerBackgroundMedia(asset)
                                   }
@@ -1066,12 +1111,12 @@ export const OperatorStudioView: React.FC = () => {
                                     <img
                                       src={asset.url}
                                       alt={asset.title}
-                                      className="absolute inset-0 w-full h-full object-cover"
+                                      className={`absolute inset-0 w-full h-full ${asset.documentId ? 'object-contain' : 'object-cover'}`}
                                     />
                                   )}
 
                                   <div className="absolute inset-x-0 bottom-0 px-2 py-1 bg-black/75 flex items-center justify-between text-[10px] text-white">
-                                    <span className="truncate">{asset.title}</span>
+                                    <span className="truncate">{asset.documentId ? `${asset.documentTitle} (${asset.documentPages} pages)` : asset.title}</span>
                                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
                                       <button
                                         onClick={(e) => {
@@ -1086,6 +1131,7 @@ export const OperatorStudioView: React.FC = () => {
                                         <button
                                           onClick={(e) => {
                                             e.stopPropagation()
+                                            if (asset.documentId && !window.confirm(`Remove all ${asset.documentPages} pages of "${asset.documentTitle}" from the library? Files remain on disk.`)) return
                                             deleteMedia(asset.id)
                                           }}
                                           className="text-zinc-400 hover:text-red-400"
@@ -1257,8 +1303,10 @@ export const OperatorStudioView: React.FC = () => {
                     </div>
 
                     <div className="p-3.5 rounded-lg bg-[#18191c] border border-[#32353e] text-center space-y-3">
-                      <div className="text-3xl font-mono font-extrabold text-emerald-400">
-                        {formatTimerSeconds(liveState.timerSeconds)}
+                      <div data-timer-state={timerDisplay(liveState.timerSeconds, liveState.timerMode).label}
+                        className={`text-3xl font-mono font-extrabold ${timerDisplay(liveState.timerSeconds, liveState.timerMode).textClass}`}>
+                        {liveState.timerMode === 'countdown' && liveState.timerSeconds < 0 && <div className="text-[11px] tracking-wider mb-1">OVERTIME</div>}
+                        {timerDisplay(liveState.timerSeconds, liveState.timerMode).time}
                       </div>
 
                       <div className="flex gap-2">
@@ -1527,6 +1575,10 @@ export const OperatorStudioView: React.FC = () => {
 
       {showSharedLibrary && <SharedLibraryModal onClose={() => setShowSharedLibrary(false)} />}
       {showMediaStorage && <MediaStorageModal onClose={() => setShowMediaStorage(false)} />}
+      {showDocumentImport && <DocumentImportModal onClose={() => setShowDocumentImport(false)} onImported={result => {
+        useStudioStore.setState({ mediaAssets: result.mediaAssets, selectedDocumentId: result.documentId, activeMediaBin: 'Sermon & Events' })
+        setShowDocumentImport(false); setCenterMode('show')
+      }} />}
       {showShortcutEditor && <KeyboardShortcutsModal bindings={shortcutBindings} onClose={() => setShowShortcutEditor(false)}
         onSave={async (bindings) => { setShortcutBindings(await window.nscApi.saveShortcuts(bindings)); setShortcutError('') }} />}
 

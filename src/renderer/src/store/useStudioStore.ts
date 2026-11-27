@@ -66,6 +66,8 @@ interface StudioStore {
   storagePath: string
 
   selectedSongId: number | null
+  selectedDocumentId: string | null
+  selectDocumentDeck: (id: string | null) => void
   activeMediaBin: MediaBin
   liveState: LivePresentationState
 
@@ -148,6 +150,8 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
   storagePath: '',
 
   selectedSongId: null,
+  selectedDocumentId: null,
+  selectDocumentDeck: (id) => set({ selectedDocumentId: id }),
   activeMediaBin: 'Worship Designs',
   liveState: defaultLiveState,
 
@@ -191,7 +195,7 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
   dismissDisplayAlert: () => set({ newlyDetectedDisplayAlert: false }),
 
   selectSongForDeck: (songId) => {
-    set({ selectedSongId: songId })
+    set({ selectedSongId: songId, selectedDocumentId: null })
   },
 
   setActiveMediaBin: (bin) => {
@@ -218,7 +222,7 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
       blackout: false,
       showLogo: false
     })
-    set({ liveState: updated, selectedSongId: song.id })
+    set({ liveState: updated, selectedSongId: song.id, selectedDocumentId: null })
   },
 
   triggerAdHocSlide: async (title, current, next) => {
@@ -238,6 +242,15 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
   },
 
   stepSlide: async (delta) => {
+    const document = get().liveState.foregroundMedia
+    if (document?.documentId) {
+      const pages = get().mediaAssets.filter(asset => asset.documentId === document.documentId)
+        .sort((a,b) => (a.documentPage ?? 0) - (b.documentPage ?? 0))
+      const index = pages.findIndex(page => page.id === document.id)
+      const target = pages[Math.max(0, Math.min(pages.length - 1, index + delta))]
+      if (target) await get().triggerForegroundGraphic(target)
+      return
+    }
     const { songs, selectedSongId, liveState, triggerSlide } = get()
     const targetSongId = liveState.activeSongId ?? selectedSongId
     const song = get().temporarySongs[targetSongId ?? -1] ?? songs.find((s) => s.id === targetSongId)
@@ -282,9 +295,11 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
     const updated = await window.nscApi.updateLiveState({
       foregroundMedia: asset,
       blackout: false,
-      showLogo: false
+      showLogo: false,
+      ...(asset.documentId ? { clearText: true, currentSlide: null, nextSlide: null, activeSongId: null,
+        activeSongTitle: asset.documentTitle ?? asset.title, activeSongKey: '', activeSlideGlobalIndex: -1 } : {})
     })
-    set({ liveState: updated })
+    set({ liveState: updated, selectedDocumentId: asset.documentId ?? null })
   },
 
   updateLiveFlags: async (partial) => {
@@ -377,11 +392,19 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
   },
 
   importVisuals: async (bin) => {
+    const existingIds = new Set(get().mediaAssets.map(asset => asset.id))
     const mediaAssets = await window.nscApi.importVisualMedia(bin)
-    set({ mediaAssets })
+    const document = mediaAssets.find(asset => asset.documentId && !existingIds.has(asset.id))
+    set({ mediaAssets, ...(document ? { selectedDocumentId: document.documentId, activeMediaBin: 'Sermon & Events' as const } : {}) })
   },
 
   deleteMedia: async (id) => {
+    const asset = get().mediaAssets.find(asset => asset.id === id)
+    if (asset?.documentId) {
+      const result = await window.nscApi.deleteDocument(asset.documentId)
+      set({ ...result, selectedDocumentId: get().selectedDocumentId === asset.documentId ? null : get().selectedDocumentId })
+      return
+    }
     const mediaAssets = await window.nscApi.deleteMedia(id)
     set({ mediaAssets })
   },
@@ -459,6 +482,7 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
     set({
       songs: data.songs,
       temporarySongs: {},
+      selectedDocumentId: null,
       mediaAssets: data.mediaAssets,
       audioTracks: data.audioTracks,
       serviceItems: data.serviceItems,

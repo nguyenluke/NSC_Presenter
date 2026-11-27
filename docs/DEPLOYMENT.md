@@ -4,7 +4,7 @@ NSC Presenter is a desktop application. Copy its standalone Windows build to the
 
 ## Run the standalone Windows ZIP
 
-The initial deliverable is **NSC-Presenter-0.1.3-Windows-x64.zip**, for 64-bit Windows. It includes Electron, the app, SQLite/WASM, and the NSC icon.
+The current deliverable is **NSC-Presenter-0.1.6-Windows-x64.zip**, for 64-bit Windows. It includes Electron, the app, SQLite/WASM, and the NSC icon.
 
 1. Right-click the ZIP and choose **Extract All**.
 2. Put the entire extracted folder somewhere permanent, such as `D:\NSC Presenter`.
@@ -19,7 +19,7 @@ The app does not automatically copy your prepared songs, playlists, media, or lo
 
 ## Optional installer
 
-The NSIS installer is configured with the same icon, an install-location picker, desktop/Start Menu shortcuts, and retained app data on uninstall. However, this build environment could not run its `makensis.exe` compiler because Windows reported **Illegal System DLL Relocation**, so no completed Setup EXE is included in this delivery. The standalone ZIP is the available deployment option. A normal development terminal can attempt `npm run dist:win`; a successful installer will be `dist\NSC-Presenter-Setup-0.1.3-x64.exe`.
+The NSIS installer is configured with the same icon, an install-location picker, desktop/Start Menu shortcuts, and retained app data on uninstall. However, this build environment could not run its `makensis.exe` compiler because Windows reported **Illegal System DLL Relocation**, so no completed Setup EXE is included in this delivery. The standalone ZIP is the available deployment option. A normal development terminal can attempt `npm run dist:win`; a successful installer will be `dist\NSC-Presenter-Setup-0.1.6-x64.exe`.
 
 ## Transfer your prepared library
 
@@ -52,4 +52,4 @@ npm run dist:win:zip
 
 The ZIP appears in `dist`. Close the running app before replacing its program folder, use the same Windows account, and keep the same app ID/name so existing local data remains available. Automatic updates are not configured. Export a current database backup and preserve your media folder before updating. For an installer build instead, use `npm run dist:win`.
 
-The app icon assets are in `build/`. Version 0.1.3 uses the hand-only logo centered inside a white rounded square with transparent outer corners and no lettering, with dedicated icon sizes from 16 to 256 px in `icon.ico` and a 512 px `icon.png`. The startup window is 1700 by 1000 px. Countdown presets offer every 5 minutes from 5 through 60 minutes.
+The app icon assets are in `build/`. Version 0.1.6 uses the hand-only logo centered inside a white rounded square with transparent outer corners and no lettering, with dedicated icon sizes from 16 to 256 px in `icon.ico` and a 512 px `icon.png`. The startup window is 1700 by 1000 px. Countdown presets offer every 5 minutes from 5 through 60 minutes.

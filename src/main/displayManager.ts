@@ -146,9 +146,14 @@ export class DisplayRouter {
         this.outputWindows.set(profile.id, win)
       } else {
         if (shouldGoFullscreen) {
-          existing.setFullScreen(false)
-          existing.setBounds(targetDisplay.bounds)
-          existing.setFullScreen(true)
+          const bounds = existing.getBounds()
+          // Text formatting must not take the projector out of fullscreen on every change.
+          if (!existing.isFullScreen() || bounds.x !== targetDisplay.bounds.x || bounds.y !== targetDisplay.bounds.y ||
+              bounds.width !== targetDisplay.bounds.width || bounds.height !== targetDisplay.bounds.height) {
+            existing.setFullScreen(false)
+            existing.setBounds(targetDisplay.bounds)
+            existing.setFullScreen(true)
+          }
           existing.setAlwaysOnTop(true, 'screen-saver')
         } else {
           if (existing.isFullScreen()) existing.setFullScreen(false)

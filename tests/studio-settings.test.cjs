@@ -12,6 +12,8 @@ const { KeyboardSettings } = require('../src/main/keyboardSettings.ts')
 const { normalizeTextLayout, customTextGeometry } = require('../src/shared/textLayout.ts')
 const { PresenterDatabase } = require('../src/main/database.ts')
 const { songSectionEntries } = require('../src/renderer/src/store/useStudioStore.ts')
+const { tickTimer, timerDisplay } = require('../src/shared/timer.ts')
+const { textStyle } = require('../src/shared/textStyle.ts')
 const key = (code, modifiers = {}) => ({ code, ctrlKey: false, altKey: false, metaKey: false, shiftKey: false, ...modifiers })
 
 function folder(t) {
@@ -95,4 +97,46 @@ test('different custom layouts persist independently per screen and presets rema
   assert.equal(reopened.getOutputProfiles().find(profile => profile.id === 'side-tv').verticalAlign, 'top')
   reopened.saveOutputProfile({ ...audience, verticalAlign: 'bottom', customTextLayout })
   assert.equal(reopened.getOutputProfiles().find(profile => profile.id === audience.id).verticalAlign, 'bottom')
+})
+
+test('countdowns continue into red overtime, pause safely, and ordinary elapsed timers remain green', () => {
+  const initial = {timerSeconds:1,timerMode:'countdown',timerRunning:true}
+  const zero = tickTimer(initial)
+  assert.equal(zero.timerSeconds,0); assert.equal(zero.timerRunning,true)
+  const overtime=tickTimer(zero)
+  assert.equal(overtime.timerSeconds,-1)
+  assert.equal(timerDisplay(-61,'countdown').time,'+01:01')
+  assert.equal(timerDisplay(-61,'countdown').label,'OVERTIME')
+  assert.equal(timerDisplay(-61,'countdown').textClass,'text-red-400')
+  assert.equal(timerDisplay(30,'countdown').urgent,true)
+  const paused={...overtime,timerRunning:false}
+  assert.equal(tickTimer(paused),paused)
+  assert.equal(tickTimer({timerSeconds:0,timerMode:'elapsed',timerRunning:true}).timerSeconds,1)
+  assert.equal(timerDisplay(90,'elapsed').expired,false)
+})
+
+test('font styles preserve legacy defaults and remain independent per language/screen', async t => {
+  assert.equal(textStyle(undefined,false).fontWeight,700)
+  assert.equal(textStyle(undefined,true).fontStyle,'italic')
+  const custom={fontFamily:'Arial',bold:false,italic:true,stretch:120,tracking:2}
+  const style=textStyle(custom,false)
+  assert.equal(style.fontWeight,400);assert.equal(style.fontStyle,'italic')
+  assert.equal(style.width,`${10000/120}%`)
+  const db=new PresenterDatabase(folder(t));await db.init()
+  const profile=db.getOutputProfiles()[0], pending=db.getPendingSongs()
+  db.saveOutputProfile({...profile,primaryTextStyle:custom,secondaryTextStyle:{fontFamily:'Georgia',bold:true,italic:false}})
+  assert.equal(db.getOutputProfiles().find(p=>p.id===profile.id).primaryTextStyle.stretch,120)
+  assert.equal(db.getOutputProfiles().find(p=>p.id===profile.id).secondaryTextStyle.italic,false)
+  assert.deepEqual(db.getPendingSongs(),pending)
+})
+
+test('the chosen logo survives restart without changing songs or sync state', async t => {
+  const dir=folder(t),db=new PresenterDatabase(dir);await db.init()
+  const first=db.addMediaAsset({title:'First logo',bin:'Logos',mediaType:'image',url:'nsc-media://asset/first.png',fitMode:'contain'})
+  db.addMediaAsset({title:'Second logo',bin:'Logos',mediaType:'image',url:'nsc-media://asset/second.png',fitMode:'contain'})
+  const pending=db.getPendingSongs()
+  db.setPreferredLogo(first.id)
+  const reopened=new PresenterDatabase(dir);await reopened.init()
+  assert.equal(reopened.getPreferredLogo().id,first.id)
+  assert.deepEqual(reopened.getPendingSongs(),pending)
 })

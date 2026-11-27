@@ -56,6 +56,10 @@ export interface MediaAsset {
   mediaType: 'image' | 'video' | 'atmosphere'
   url: string
   fitMode: 'cover' | 'contain'
+  documentId?: string
+  documentTitle?: string
+  documentPage?: number
+  documentPages?: number
 }
 
 export type AudioCategory = 'Worship Pads' | 'Pre-Service Music'
@@ -96,6 +100,14 @@ export interface CustomTextLayout {
   languageGap: number
 }
 
+export interface TextStyle {
+  fontFamily?: string
+  bold?: boolean
+  italic?: boolean
+  stretch?: number
+  tracking?: number
+}
+
 /**
  * Dynamic Output Screen Profile (ProPresenter "Configure Screens" model):
  * Users can create 1, 2, 3, 4, or more Audience or Stage screens dynamically
@@ -116,6 +128,8 @@ export interface OutputProfile {
   dimOpacity: number
   verticalAlign: 'top' | 'center' | 'bottom' | 'custom'
   customTextLayout?: CustomTextLayout
+  primaryTextStyle?: TextStyle
+  secondaryTextStyle?: TextStyle
 }
 
 export interface SlideCue extends BilingualSlide {

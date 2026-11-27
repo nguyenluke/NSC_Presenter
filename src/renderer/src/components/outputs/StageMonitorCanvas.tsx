@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { LivePresentationState, OutputProfile } from '@shared/types'
+import { timerDisplay } from '@shared/timer'
 
 interface StageMonitorCanvasProps {
   liveState: LivePresentationState
@@ -41,9 +42,9 @@ export const StageMonitorCanvas: React.FC<StageMonitorCanvasProps> = ({ liveStat
 
   const current = liveState.clearText ? null : liveState.currentSlide
   const next = liveState.clearText ? null : liveState.nextSlide
-  const isTimerUrgent =
-    liveState.timerMode === 'countdown' && liveState.timerSeconds <= 60 && liveState.timerSeconds > 0
-  const isTimerExpired = liveState.timerMode === 'countdown' && liveState.timerSeconds === 0
+  const timer = timerDisplay(liveState.timerSeconds, liveState.timerMode)
+  const isTimerUrgent = timer.urgent
+  const isTimerExpired = timer.expired
 
   const showPrimary = profile.languageMode === 'both' || profile.languageMode === 'primary'
   const showSecondary = profile.languageMode === 'both' || profile.languageMode === 'secondary'
@@ -79,14 +80,16 @@ export const StageMonitorCanvas: React.FC<StageMonitorCanvasProps> = ({ liveStat
                 : 'bg-zinc-900 border-zinc-700 text-emerald-400'
           }`}
         >
-          {liveState.timerMode === 'countdown' ? 'TIMER ' : 'ELAPSED '}
-          {formatTimerSeconds(liveState.timerSeconds)}
+          {timer.label} {timer.time}
         </div>
       </div>
 
       {/* CENTER: CURRENT SLIDE (Huge High-Contrast Lyrics + Optional Chords) */}
       <div className="flex-1 flex flex-col justify-center py-6">
-        {current ? (
+        {liveState.foregroundMedia?.documentId ? <div className="flex flex-col items-center gap-3 min-h-0">
+          <span className="text-2xl font-bold text-cyan-300">{liveState.foregroundMedia.documentTitle} · Page {liveState.foregroundMedia.documentPage}/{liveState.foregroundMedia.documentPages}</span>
+          <img src={liveState.foregroundMedia.url} alt="Current sermon page" className="h-[440px] max-w-full object-contain" />
+        </div> : current ? (
           <div className="space-y-5">
             <div className="flex items-center gap-4">
               <span className="px-4 py-1 rounded-md bg-red-600 text-white text-2xl font-bold uppercase tracking-wider">
